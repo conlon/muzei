@@ -23,6 +23,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.SparseArray
 import android.util.TypedValue
+import android.widget.Toast
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -84,6 +85,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -110,6 +112,41 @@ class ArtDetailViewModel(application: Application) : AndroidViewModel(applicatio
 
     val currentArtwork = database.artworkDao().getCurrentArtworkFlow()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), null)
+
+    val currentArtworkHasSavedViewport = database.artworkDao().getCurrentArtworkFlow()
+            .map { it?.hasSavedViewport == true }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
+
+    private val backStack = mutableListOf<Long>()
+    val hasPreviousArtwork = MutableStateFlow(false)
+
+    fun pushCurrentToBackStack() {
+        val artworkId = currentArtwork.value?.id ?: return
+        backStack.add(artworkId)
+        hasPreviousArtwork.value = true
+    }
+
+    fun previousArtwork() {
+        if (backStack.isEmpty()) return
+        val previousId = backStack.removeAt(backStack.lastIndex)
+        hasPreviousArtwork.value = backStack.isNotEmpty()
+        viewModelScope.launch {
+            database.artworkDao().updateDateAdded(previousId, System.currentTimeMillis())
+        }
+    }
+
+    fun saveFraming(artworkId: Long, viewport: android.graphics.RectF) {
+        viewModelScope.launch {
+            database.artworkDao().updateSavedViewport(
+                    artworkId, viewport.left, viewport.top, viewport.right, viewport.bottom)
+        }
+    }
+
+    fun clearFraming(artworkId: Long) {
+        viewModelScope.launch {
+            database.artworkDao().updateSavedViewport(artworkId, null, null, null, null)
+        }
+    }
 }
 
 class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
@@ -237,10 +274,36 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
             }
         }
 
+        binding.prevArtwork.setOnClickListener {
+            viewModel.previousArtwork()
+            showFakeLoading()
+        }
+        TooltipCompat.setTooltipText(binding.prevArtwork, binding.prevArtwork.contentDescription)
+
+        binding.saveFraming.setOnClickListener {
+            val artwork = viewModel.currentArtwork.value ?: return@setOnClickListener
+            val viewport = ArtDetailViewport.getViewport(currentViewportId)
+            if (viewport.width() == 0f || viewport.height() == 0f) return@setOnClickListener
+            viewModel.saveFraming(artwork.id, viewport)
+            updateSaveFramingButton(true)
+            Toast.makeText(requireContext(), R.string.toast_framing_saved,
+                    Toast.LENGTH_SHORT).show()
+        }
+        binding.saveFraming.setOnLongClickListener {
+            val artwork = viewModel.currentArtwork.value ?: return@setOnLongClickListener false
+            viewModel.clearFraming(artwork.id)
+            updateSaveFramingButton(false)
+            Toast.makeText(requireContext(), R.string.toast_framing_cleared,
+                    Toast.LENGTH_SHORT).show()
+            true
+        }
+        TooltipCompat.setTooltipText(binding.saveFraming, binding.saveFraming.contentDescription)
+
         binding.nextArtwork.setOnClickListener {
             Firebase.analytics.logEvent("next_artwork") {
                 param(FirebaseAnalytics.Param.CONTENT_TYPE, "art_detail")
             }
+            viewModel.pushCurrentToBackStack()
             ProviderManager.getInstance(requireContext()).nextArtwork()
             showFakeLoading()
         }
@@ -420,6 +483,14 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
             showFakeLoading = false
             updateLoadingSpinnerVisibility()
         }
+
+        viewModel.currentArtworkHasSavedViewport.collectIn(viewLifecycleOwner) { hasSaved ->
+            updateSaveFramingButton(hasSaved)
+        }
+
+        viewModel.hasPreviousArtwork.collectIn(viewLifecycleOwner) { hasPrevious ->
+            binding.prevArtwork.isVisible = hasPrevious
+        }
     }
 
     override fun onStart() {
@@ -483,6 +554,14 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
         super.onStop()
         binding.overflowMenu.hideOverflowMenu()
         ArtDetailOpen.value = false
+    }
+
+    private fun updateSaveFramingButton(hasSavedViewport: Boolean) {
+        binding.saveFraming.alpha = if (hasSavedViewport) 1f else 0.5f
+        binding.saveFraming.contentDescription = getString(
+                if (hasSavedViewport) R.string.action_clear_framing
+                else R.string.action_save_framing)
+        TooltipCompat.setTooltipText(binding.saveFraming, binding.saveFraming.contentDescription)
     }
 
     private fun showFakeLoading() {

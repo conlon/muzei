@@ -56,6 +56,22 @@ data class Artwork(
     @ColumnInfo(name = "date_added")
     var dateAdded = Date()
 
+    @ColumnInfo(name = "saved_viewport_left")
+    var savedViewportLeft: Float? = null
+
+    @ColumnInfo(name = "saved_viewport_top")
+    var savedViewportTop: Float? = null
+
+    @ColumnInfo(name = "saved_viewport_right")
+    var savedViewportRight: Float? = null
+
+    @ColumnInfo(name = "saved_viewport_bottom")
+    var savedViewportBottom: Float? = null
+
+    val hasSavedViewport: Boolean
+        get() = savedViewportLeft != null && savedViewportTop != null
+                && savedViewportRight != null && savedViewportBottom != null
+
     companion object {
 
         fun getContentUri(id: Long): Uri {

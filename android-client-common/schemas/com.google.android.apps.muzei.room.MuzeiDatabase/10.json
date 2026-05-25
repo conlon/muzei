@@ -1,0 +1,125 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 10,
+    "identityHash": "4905edb8615fcb0243fd8ff65e5a0fe1",
+    "entities": [
+      {
+        "tableName": "Artwork",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`imageUri` TEXT NOT NULL, `_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerAuthority` TEXT NOT NULL, `title` TEXT, `byline` TEXT, `attribution` TEXT, `metaFont` TEXT NOT NULL, `date_added` INTEGER NOT NULL, `saved_viewport_left` REAL, `saved_viewport_top` REAL, `saved_viewport_right` REAL, `saved_viewport_bottom` REAL)",
+        "fields": [
+          {
+            "fieldPath": "imageUri",
+            "columnName": "imageUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerAuthority",
+            "columnName": "providerAuthority",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "byline",
+            "columnName": "byline",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attribution",
+            "columnName": "attribution",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "metaFont",
+            "columnName": "metaFont",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateAdded",
+            "columnName": "date_added",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedViewportLeft",
+            "columnName": "saved_viewport_left",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "savedViewportTop",
+            "columnName": "saved_viewport_top",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "savedViewportRight",
+            "columnName": "saved_viewport_right",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "savedViewportBottom",
+            "columnName": "saved_viewport_bottom",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_Artwork_providerAuthority",
+            "unique": false,
+            "columnNames": [
+              "providerAuthority"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_Artwork_providerAuthority` ON `${TABLE_NAME}` (`providerAuthority`)"
+          }
+        ]
+      },
+      {
+        "tableName": "provider",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`authority` TEXT NOT NULL, `supportsNextArtwork` INTEGER NOT NULL, PRIMARY KEY(`authority`))",
+        "fields": [
+          {
+            "fieldPath": "authority",
+            "columnName": "authority",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "supportsNextArtwork",
+            "columnName": "supportsNextArtwork",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "authority"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4905edb8615fcb0243fd8ff65e5a0fe1')"
+    ]
+  }
+}

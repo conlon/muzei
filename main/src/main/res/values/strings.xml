@@ -61,6 +61,11 @@
     <string name="section_choose_source">Sources</string>
     <string name="section_effects">Effects</string>
 
+    <string name="action_save_framing">Save framing</string>
+    <string name="action_clear_framing">Clear saved framing</string>
+    <string name="toast_framing_saved">Framing saved</string>
+    <string name="toast_framing_cleared">Saved framing cleared</string>
+    <string name="action_previous_artwork">Previous artwork</string>
     <string name="action_next_artwork">Next artwork</string>
     <string name="action_next_artwork_condensed">Next</string>
     <string name="action_user_command">More</string>

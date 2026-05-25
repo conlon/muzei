@@ -81,6 +81,23 @@ abstract class ArtworkDao {
         WHERE title LIKE :query OR byline LIKE :query OR attribution LIKE :query""")
     abstract suspend fun searchArtwork(query: String): List<Artwork>
 
+    @Query("UPDATE artwork SET date_added = :dateMillis WHERE _id = :id")
+    abstract suspend fun updateDateAdded(id: Long, dateMillis: Long)
+
+    @Query("""UPDATE artwork SET
+        saved_viewport_left = :left,
+        saved_viewport_top = :top,
+        saved_viewport_right = :right,
+        saved_viewport_bottom = :bottom
+        WHERE _id = :id""")
+    abstract suspend fun updateSavedViewport(
+        id: Long,
+        left: Float?,
+        top: Float?,
+        right: Float?,
+        bottom: Float?
+    )
+
     @Query("DELETE FROM artwork WHERE _id=:id")
     abstract fun deleteById(id: Long)
 }
