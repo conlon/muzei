@@ -16,7 +16,9 @@
 
 package com.google.android.apps.muzei.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,7 +31,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -56,6 +60,8 @@ fun GestureSettings(
     onDoubleTapSelectedOptionChange: (String) -> Unit,
     threeFingerSelectedOption: String,
     onThreeFingerSelectedOptionChange: (String) -> Unit,
+    parallaxEnabled: Boolean,
+    onParallaxEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onUp: () -> Unit = {},
 ) {
@@ -114,6 +120,30 @@ fun GestureSettings(
                 onOptionSelected = onThreeFingerSelectedOptionChange,
                 modifier = Modifier.padding(bottom = 16.dp),
             )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.gestures_parallax_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    Text(
+                        text = stringResource(R.string.gestures_parallax_description),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Switch(
+                    checked = parallaxEnabled,
+                    onCheckedChange = onParallaxEnabledChange,
+                    modifier = Modifier.padding(start = 16.dp),
+                )
+            }
         }
     }
 }
@@ -133,11 +163,14 @@ fun GestureSettingsPreview() {
         var doubleTapSelectedOption by remember { mutableStateOf(defaultDoubleTapOption) }
         val defaultThreeFingerOption = stringResource(R.string.gestures_tap_action_none)
         var threeFingerSelectedOption by remember { mutableStateOf(defaultThreeFingerOption) }
+        var parallaxEnabled by remember { mutableStateOf(true) }
         GestureSettings(
             doubleTapSelectedOption = doubleTapSelectedOption,
             onDoubleTapSelectedOptionChange = { doubleTapSelectedOption = it },
             threeFingerSelectedOption = threeFingerSelectedOption,
             onThreeFingerSelectedOptionChange = { threeFingerSelectedOption = it },
+            parallaxEnabled = parallaxEnabled,
+            onParallaxEnabledChange = { parallaxEnabled = it },
             modifier = Modifier.fillMaxSize(),
         )
     }

@@ -300,7 +300,9 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
         ) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset,
                     yPixelOffset)
-            renderer.setNormalOffsetX(xOffset)
+            val parallaxDisabled = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
+                    .getBoolean(Prefs.PREF_DISABLE_PARALLAX, false)
+            renderer.setNormalOffsetX(if (parallaxDisabled) 0.5f else xOffset)
         }
 
         override fun onZoomChanged(zoom: Float) {

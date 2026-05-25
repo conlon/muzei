@@ -77,6 +77,9 @@ class GesturesFragment : Fragment() {
                 prefToStringMapper(threeFingerValue)
             }
             var threeFingerSelectedOption by remember { mutableStateOf(defaultThreeFingerOption) }
+            var parallaxEnabled by remember {
+                mutableStateOf(!prefs.getBoolean(Prefs.PREF_DISABLE_PARALLAX, false))
+            }
             GestureSettings(
                 doubleTapSelectedOption = doubleTapSelectedOption,
                 onDoubleTapSelectedOptionChange = { selectedOption ->
@@ -91,6 +94,13 @@ class GesturesFragment : Fragment() {
                         putString(Prefs.PREF_THREE_FINGER_TAP, stringToPrefMapper(selectedOption))
                     }
                     threeFingerSelectedOption = selectedOption
+                },
+                parallaxEnabled = parallaxEnabled,
+                onParallaxEnabledChange = { enabled ->
+                    prefs.edit {
+                        putBoolean(Prefs.PREF_DISABLE_PARALLAX, !enabled)
+                    }
+                    parallaxEnabled = enabled
                 },
                 onUp = {
                     val navController = findNavController()

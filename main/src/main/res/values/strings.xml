@@ -112,6 +112,8 @@
     <string name="gestures_tap_action_next">Next Artwork</string>
     <string name="gestures_tap_action_view_details">View Artwork Details</string>
     <string name="gestures_tap_action_none">None</string>
+    <string name="gestures_parallax_title">Parallax Scrolling</string>
+    <string name="gestures_parallax_description">Pan the wallpaper when swiping between home screen pages.</string>
 
     <string name="actions_always_dark">Always Dark</string>
 
