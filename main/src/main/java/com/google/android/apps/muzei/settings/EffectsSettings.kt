@@ -138,11 +138,13 @@ fun EffectsSettings(
             val blurPref = if (page == 0) Prefs.PREF_BLUR_AMOUNT else Prefs.PREF_LOCK_BLUR_AMOUNT
             val dimPref = if (page == 0) Prefs.PREF_DIM_AMOUNT else Prefs.PREF_LOCK_DIM_AMOUNT
             val greyPref = if (page == 0) Prefs.PREF_GREY_AMOUNT else Prefs.PREF_LOCK_GREY_AMOUNT
+            val parallaxPref = if (page == 0) Prefs.PREF_PARALLAX_AMOUNT else null
             EffectsScreen(
                 prefs = prefs,
                 blurPref = blurPref,
                 dimPref = dimPref,
                 greyPref = greyPref,
+                parallaxPref = parallaxPref,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -378,6 +380,10 @@ private fun EffectsSettingsActions(
                     putInt(
                         Prefs.PREF_LOCK_GREY_AMOUNT,
                         MuzeiBlurRenderer.DEFAULT_GREY
+                    )
+                    putInt(
+                        Prefs.PREF_PARALLAX_AMOUNT,
+                        Prefs.DEFAULT_PARALLAX
                     )
                 }
             }

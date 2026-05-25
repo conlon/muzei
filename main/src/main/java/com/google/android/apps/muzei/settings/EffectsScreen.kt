@@ -53,6 +53,7 @@ fun EffectsScreen(
     blurPref: String,
     dimPref: String,
     greyPref: String,
+    parallaxPref: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val blur =
@@ -61,6 +62,9 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, dimPref, MuzeiBlurRenderer.DEFAULT_MAX_DIM)
     val grey =
         rememberPreferenceSourcedValue(prefs, greyPref, MuzeiBlurRenderer.DEFAULT_GREY)
+    val parallax = parallaxPref?.let {
+        rememberPreferenceSourcedValue(prefs, it, Prefs.DEFAULT_PARALLAX)
+    }
     EffectsScreen(
         blur = blur.value,
         onBlurChange = {
@@ -83,6 +87,9 @@ fun EffectsScreen(
         onGreyChangeFinished = {
             grey.userControlled = false
         },
+        parallax = parallax?.value,
+        onParallaxChange = parallax?.let { p -> { value: Int -> p.value = value } },
+        onParallaxChangeFinished = parallax?.let { p -> { p.userControlled = false } },
         modifier = modifier
     )
 }
@@ -98,6 +105,9 @@ fun EffectsScreen(
     grey: Int,
     onGreyChange: (Int) -> Unit,
     onGreyChangeFinished: (() -> Unit),
+    parallax: Int? = null,
+    onParallaxChange: ((Int) -> Unit)? = null,
+    onParallaxChangeFinished: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowSize = with(LocalDensity.current) {
@@ -118,6 +128,9 @@ fun EffectsScreen(
             grey = grey,
             onGreyChange = onGreyChange,
             onGreyChangeFinished = onGreyChangeFinished,
+            parallax = parallax,
+            onParallaxChange = onParallaxChange,
+            onParallaxChangeFinished = onParallaxChangeFinished,
         )
     } else {
         EffectsGrid(
@@ -133,6 +146,9 @@ fun EffectsScreen(
             grey = grey,
             onGreyChange = onGreyChange,
             onGreyChangeFinished = onGreyChangeFinished,
+            parallax = parallax,
+            onParallaxChange = onParallaxChange,
+            onParallaxChangeFinished = onParallaxChangeFinished,
         )
     }
 }
@@ -149,7 +165,12 @@ private fun EffectsGrid(
     grey: Int = MuzeiBlurRenderer.DEFAULT_GREY,
     onGreyChange: (Int) -> Unit = {},
     onGreyChangeFinished: (() -> Unit) = {},
+    parallax: Int? = null,
+    onParallaxChange: ((Int) -> Unit)? = null,
+    onParallaxChangeFinished: (() -> Unit)? = null,
 ) {
+    val showParallax = parallax != null && onParallaxChange != null
+    val rowCount = if (showParallax) 4 else 3
     Layout(
         content = {
             // Titles
@@ -171,6 +192,14 @@ private fun EffectsGrid(
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
+            if (showParallax) {
+                Text(
+                    text = stringResource(R.string.settings_parallax_amount_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
             // Sliders
             Slider(
                 value = blur.toFloat(),
@@ -208,15 +237,29 @@ private fun EffectsGrid(
                     inactiveTrackColor = Color.DarkGray,
                 )
             )
+            if (showParallax) {
+                Slider(
+                    value = parallax!!.toFloat(),
+                    onValueChange = { onParallaxChange!!(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..100f,
+                    onValueChangeFinished = onParallaxChangeFinished,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.DarkGray,
+                    )
+                )
+            }
         },
         modifier = modifier
     ) { measurables, constraints ->
-        val titlePlaceables = measurables.take(3).map { measurable ->
+        val titlePlaceables = measurables.take(rowCount).map { measurable ->
             measurable.measure(constraints.copy(minWidth = 0))
         }
         val maxTitleWidth = titlePlaceables.maxOf { it.width }
         val spacing = 16.dp.roundToPx()
-        val sliderPlaceables = measurables.takeLast(3).map { measurable ->
+        val sliderPlaceables = measurables.takeLast(rowCount).map { measurable ->
             measurable.measure(
                 constraints.copy(
                     minWidth = constraints.maxWidth - maxTitleWidth - spacing,
@@ -230,7 +273,7 @@ private fun EffectsGrid(
         val maxColumnHeight = columnHeights.max()
 
         val layoutWidth = constraints.maxWidth
-        val layoutHeight = maxColumnHeight * 3
+        val layoutHeight = maxColumnHeight * rowCount
         layout(layoutWidth, layoutHeight) {
             titlePlaceables.forEachIndexed { index, titlePlaceable ->
                 val height = titlePlaceable.height
