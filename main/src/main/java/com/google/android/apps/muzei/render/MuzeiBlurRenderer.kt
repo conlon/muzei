@@ -89,6 +89,7 @@ class MuzeiBlurRenderer(
     private val viewMatrix = FloatArray(16)
 
     private var aspectRatio: Float = 0f
+    fun getAspectRatio(): Float = aspectRatio
     private var currentHeight: Int = 0
 
     private var currentGLPictureSet: GLPictureSet
@@ -103,6 +104,8 @@ class MuzeiBlurRenderer(
     private var normalOffsetX: Float = 0f
     @Volatile
     private var zoomAmount: Float = 1f
+    @Volatile
+    var pendingSavedViewport: RectF? = null
     private val currentViewport = RectF() // [-1, -1] to [1, 1], flipped
 
     var isBlurred = true
@@ -288,9 +291,15 @@ class MuzeiBlurRenderer(
         if (!demoMode && !preview) {
             SwitchingPhotosStateFlow.value = SwitchingPhotosInProgress(nextGLPictureSet.id)
             ArtworkSizeStateFlow.value = ArtworkSize(width, height)
-            ArtDetailViewport.setDefaultViewport(nextGLPictureSet.id,
-                    width * 1f / height,
-                    aspectRatio)
+            val savedViewport = pendingSavedViewport
+            nextGLPictureSet.savedViewport = savedViewport
+            if (savedViewport != null) {
+                ArtDetailViewport.setViewport(nextGLPictureSet.id, savedViewport)
+            } else {
+                ArtDetailViewport.setDefaultViewport(nextGLPictureSet.id,
+                        width * 1f / height,
+                        aspectRatio)
+            }
         }
 
         nextGLPictureSet.load(imageLoader)
@@ -322,6 +331,7 @@ class MuzeiBlurRenderer(
         private var hasBitmap = false
         private var bitmapAspectRatio = 1f
         var dimAmount = 0
+        var savedViewport: RectF? = null
 
         fun load(imageLoader: ImageLoader) {
             val (width, height) = imageLoader.getSize()
@@ -431,27 +441,37 @@ class MuzeiBlurRenderer(
                 return
             }
 
-            // Ensure the bitmap is as wide as the screen by applying zoom if necessary
-            // ignoring any system wide zoom requests while the Art Detail screen is open
-            val zoom = max(1f, screenToBitmapAspectRatio) *
-                    (if (ArtDetailOpen.value) 1f else zoomAmount)
+            val saved = savedViewport
+            if (saved != null) {
+                currentViewport.apply {
+                    left = interpolate(-1f, 1f, saved.left)
+                    right = interpolate(-1f, 1f, saved.right)
+                    top = interpolate(1f, -1f, saved.top)
+                    bottom = interpolate(1f, -1f, saved.bottom)
+                }
+            } else {
+                // Ensure the bitmap is as wide as the screen by applying zoom if necessary
+                // ignoring any system wide zoom requests while the Art Detail screen is open
+                val zoom = max(1f, screenToBitmapAspectRatio) *
+                        (if (ArtDetailOpen.value) 1f else zoomAmount)
 
-            // Total scale factors in both zoom and scale due to aspect ratio.
-            val scaledBitmapToScreenAspectRatio = zoom / screenToBitmapAspectRatio
+                // Total scale factors in both zoom and scale due to aspect ratio.
+                val scaledBitmapToScreenAspectRatio = zoom / screenToBitmapAspectRatio
 
-            // At most pan across 1.8 screenfuls (2 screenfuls + some parallax)
-            // TODO: if we know the number of home screen pages, use that number here
-            val maxPanScreenWidths = min(1.8f, scaledBitmapToScreenAspectRatio)
+                // At most pan across 1.8 screenfuls (2 screenfuls + some parallax)
+                // TODO: if we know the number of home screen pages, use that number here
+                val maxPanScreenWidths = min(1.8f, scaledBitmapToScreenAspectRatio)
 
-            currentViewport.apply {
-                left = interpolate(-1f, 1f,
-                        interpolate(
-                                (1 - maxPanScreenWidths / scaledBitmapToScreenAspectRatio) / 2,
-                                (1 + (maxPanScreenWidths - 2) / scaledBitmapToScreenAspectRatio) / 2,
-                                normalOffsetX))
-                right = left + 2f / scaledBitmapToScreenAspectRatio
-                bottom = -1f / zoom
-                top = 1f / zoom
+                currentViewport.apply {
+                    left = interpolate(-1f, 1f,
+                            interpolate(
+                                    (1 - maxPanScreenWidths / scaledBitmapToScreenAspectRatio) / 2,
+                                    (1 + (maxPanScreenWidths - 2) / scaledBitmapToScreenAspectRatio) / 2,
+                                    normalOffsetX))
+                    right = left + 2f / scaledBitmapToScreenAspectRatio
+                    bottom = -1f / zoom
+                    top = 1f / zoom
+                }
             }
 
             val focusAmount = (blurKeyframes - blurAnimator.currentValue) / blurKeyframes

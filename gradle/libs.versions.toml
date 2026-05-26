@@ -58,6 +58,10 @@ dokka = "2.2.0"
 kotlin = "2.3.21"
 ksp = "2.3.7"
 
+# ML Kit
+mlkitFaceDetection = "16.1.7"
+mlkitObjectDetection = "17.0.2"
+
 # Other
 coil = "3.4.0"
 material = "1.13.0"
@@ -130,6 +134,10 @@ coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-
 coroutines-playservices = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 dokka = { group = "org.jetbrains.dokka", name = "dokka-gradle-plugin", version.ref = "dokka" }
 kotlin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+
+# ML Kit
+mlkit-face-detection = { group = "com.google.mlkit", name = "face-detection", version.ref = "mlkitFaceDetection" }
+mlkit-object-detection = { group = "com.google.mlkit", name = "object-detection", version.ref = "mlkitObjectDetection" }
 
 # Other
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }

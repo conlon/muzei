@@ -17,6 +17,7 @@
 package com.google.android.apps.muzei.render
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.apps.muzei.api.MuzeiContract
 import com.google.android.apps.muzei.room.MuzeiDatabase
@@ -46,6 +47,15 @@ class RealRenderController(
         val database = MuzeiDatabase.getInstance(context)
         database.artworkDao().getCurrentArtworkFlow().filterNotNull().collectIn(owner) { artwork ->
             currentArtworkUri = artwork.contentUri
+            val screenAspectRatio = renderer.getAspectRatio()
+            if (screenAspectRatio > 0f) {
+                val autoViewport = AutoFramingEngine.computeFraming(
+                        context.contentResolver, currentArtworkUri, screenAspectRatio)
+                renderer.pendingSavedViewport = autoViewport
+                if (autoViewport != null) {
+                    Log.d("RealRenderController", "Auto-framing applied: $autoViewport")
+                }
+            }
             reloadCurrentArtwork()
         }
     }

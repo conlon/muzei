@@ -136,6 +136,9 @@ dependencies {
     implementation libs.navigation.fragment
     implementation libs.navigation.ui
 
+    implementation libs.mlkit.face.detection
+    implementation libs.mlkit.object.detection
+
     implementation project(':muzei-api')
     implementation project(':extensions')
     implementation project(':android-client-common')
