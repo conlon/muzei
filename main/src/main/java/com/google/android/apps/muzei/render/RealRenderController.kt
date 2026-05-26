@@ -51,7 +51,13 @@ class RealRenderController(
                 RectF(artwork.savedViewportLeft!!, artwork.savedViewportTop!!,
                         artwork.savedViewportRight!!, artwork.savedViewportBottom!!)
             } else {
-                null
+                val screenAspectRatio = renderer.getAspectRatio()
+                if (screenAspectRatio > 0f) {
+                    AutoFramingEngine.computeFraming(
+                            context.contentResolver, currentArtworkUri, screenAspectRatio)
+                } else {
+                    null
+                }
             }
             reloadCurrentArtwork()
         }

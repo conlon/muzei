@@ -89,6 +89,7 @@ class MuzeiBlurRenderer(
     private val viewMatrix = FloatArray(16)
 
     private var aspectRatio: Float = 0f
+    fun getAspectRatio(): Float = aspectRatio
     private var currentHeight: Int = 0
 
     private var currentGLPictureSet: GLPictureSet
