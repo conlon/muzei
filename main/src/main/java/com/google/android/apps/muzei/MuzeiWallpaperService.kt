@@ -81,6 +81,7 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
 
     companion object {
         private const val TEMPORARY_FOCUS_DURATION_MILLIS: Long = 3000
+        private const val TWO_FINGER_TAP_INTERVAL_MS = 1000L
         private const val THREE_FINGER_TAP_INTERVAL_MS = 1000L
         private const val MAX_ARTWORK_SIZE = 110 // px
     }
@@ -155,6 +156,7 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
         private var currentArtworkColors: WallpaperColors? = null
 
         private var validDoubleTap: Boolean = false
+        private var lastTwoFingerTap = 0L
         private var lastThreeFingerTap = 0L
 
         private val engineLifecycle = LifecycleRegistry(this)
@@ -378,16 +380,21 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
             gestureDetector.onTouchEvent(event)
             // Delay blur from temporary refocus while touching the screen
             delayedBlur()
-            // See if there was a valid three finger tap
             val now = SystemClock.elapsedRealtime()
-            val timeSinceLastThreeFingerTap = now - lastThreeFingerTap
+            if (event.pointerCount == 2
+                && now - lastTwoFingerTap > TWO_FINGER_TAP_INTERVAL_MS) {
+                lastTwoFingerTap = now
+                val prefs = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
+                val twoFingerTapValue = prefs.getString(Prefs.PREF_TWO_FINGER_TAP,
+                        null) ?: Prefs.PREF_TAP_ACTION_NONE
+                triggerTapAction(twoFingerTapValue, "gesture_two_finger")
+            }
             if (event.pointerCount == 3
-                && timeSinceLastThreeFingerTap > THREE_FINGER_TAP_INTERVAL_MS) {
+                && now - lastThreeFingerTap > THREE_FINGER_TAP_INTERVAL_MS) {
                 lastThreeFingerTap = now
                 val prefs = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
                 val threeFingerTapValue = prefs.getString(Prefs.PREF_THREE_FINGER_TAP,
                         null) ?: Prefs.PREF_TAP_ACTION_NONE
-
                 triggerTapAction(threeFingerTapValue, "gesture_three_finger")
             }
         }

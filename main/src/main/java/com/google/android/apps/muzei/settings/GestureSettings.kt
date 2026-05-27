@@ -54,6 +54,8 @@ import net.nurik.roman.muzei.R
 fun GestureSettings(
     doubleTapSelectedOption: String,
     onDoubleTapSelectedOptionChange: (String) -> Unit,
+    twoFingerSelectedOption: String,
+    onTwoFingerSelectedOptionChange: (String) -> Unit,
     threeFingerSelectedOption: String,
     onThreeFingerSelectedOptionChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -105,6 +107,16 @@ fun GestureSettings(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
             RadioButtonSectionHeader(
+                title = stringResource(R.string.gestures_two_finger_tap_title),
+                description = stringResource(R.string.gestures_two_finger_tap_description)
+            )
+            RadioButtonGroup(
+                options = gestureOptions,
+                selectedOption = twoFingerSelectedOption,
+                onOptionSelected = onTwoFingerSelectedOptionChange,
+                modifier = Modifier.padding(bottom = 16.dp),
+            )
+            RadioButtonSectionHeader(
                 title = stringResource(R.string.gestures_three_finger_tap_title),
                 description = stringResource(R.string.gestures_three_finger_tap_description)
             )
@@ -131,11 +143,15 @@ fun GestureSettingsPreview() {
     ) {
         val defaultDoubleTapOption = stringResource(R.string.gestures_tap_action_temporary_disable)
         var doubleTapSelectedOption by remember { mutableStateOf(defaultDoubleTapOption) }
+        val defaultTwoFingerOption = stringResource(R.string.gestures_tap_action_none)
+        var twoFingerSelectedOption by remember { mutableStateOf(defaultTwoFingerOption) }
         val defaultThreeFingerOption = stringResource(R.string.gestures_tap_action_none)
         var threeFingerSelectedOption by remember { mutableStateOf(defaultThreeFingerOption) }
         GestureSettings(
             doubleTapSelectedOption = doubleTapSelectedOption,
             onDoubleTapSelectedOptionChange = { doubleTapSelectedOption = it },
+            twoFingerSelectedOption = twoFingerSelectedOption,
+            onTwoFingerSelectedOptionChange = { twoFingerSelectedOption = it },
             threeFingerSelectedOption = threeFingerSelectedOption,
             onThreeFingerSelectedOptionChange = { threeFingerSelectedOption = it },
             modifier = Modifier.fillMaxSize(),
