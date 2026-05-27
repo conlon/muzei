@@ -70,6 +70,13 @@ class GesturesFragment : Fragment() {
                 prefToStringMapper(doubleTapValue)
             }
             var doubleTapSelectedOption by remember { mutableStateOf(defaultDoubleTapOption) }
+            val defaultTwoFingerOption = remember {
+                val twoFingerValue = prefs.getString(
+                    Prefs.PREF_TWO_FINGER_TAP, Prefs.PREF_TAP_ACTION_NONE
+                )
+                prefToStringMapper(twoFingerValue)
+            }
+            var twoFingerSelectedOption by remember { mutableStateOf(defaultTwoFingerOption) }
             val defaultThreeFingerOption = remember {
                 val threeFingerValue = prefs.getString(
                     Prefs.PREF_THREE_FINGER_TAP, Prefs.PREF_TAP_ACTION_NONE
@@ -84,6 +91,13 @@ class GesturesFragment : Fragment() {
                         putString(Prefs.PREF_DOUBLE_TAP, stringToPrefMapper(selectedOption))
                     }
                     doubleTapSelectedOption = selectedOption
+                },
+                twoFingerSelectedOption = twoFingerSelectedOption,
+                onTwoFingerSelectedOptionChange = { selectedOption ->
+                    prefs.edit {
+                        putString(Prefs.PREF_TWO_FINGER_TAP, stringToPrefMapper(selectedOption))
+                    }
+                    twoFingerSelectedOption = selectedOption
                 },
                 threeFingerSelectedOption = threeFingerSelectedOption,
                 onThreeFingerSelectedOptionChange = { selectedOption ->
