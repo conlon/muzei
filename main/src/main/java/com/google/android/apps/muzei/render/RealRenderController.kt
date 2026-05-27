@@ -22,6 +22,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.google.android.apps.muzei.api.MuzeiContract
 import com.google.android.apps.muzei.room.MuzeiDatabase
 import com.google.android.apps.muzei.room.contentUri
+import com.google.android.apps.muzei.settings.Prefs
 import com.google.android.apps.muzei.util.collectIn
 import kotlinx.coroutines.flow.filterNotNull
 
@@ -51,8 +52,10 @@ class RealRenderController(
                 RectF(artwork.savedViewportLeft!!, artwork.savedViewportTop!!,
                         artwork.savedViewportRight!!, artwork.savedViewportBottom!!)
             } else {
+                val autoFramingEnabled = Prefs.getSharedPreferences(context)
+                        .getBoolean(Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
                 val screenAspectRatio = renderer.getAspectRatio()
-                if (screenAspectRatio > 0f) {
+                if (autoFramingEnabled && screenAspectRatio > 0f) {
                     AutoFramingEngine.computeFraming(
                             context.contentResolver, currentArtworkUri, screenAspectRatio)
                 } else {

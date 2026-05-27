@@ -23,6 +23,7 @@
     <string name="settings_blur_amount_title">Blur</string>
     <string name="settings_dim_amount_title">Dim</string>
     <string name="settings_grey_amount_title">Grey</string>
+    <string name="settings_auto_framing_title">Auto-frame subjects</string>
 
     <string name="notification_new_wallpaper">New wallpaper</string>
     <string name="notification_new_wallpaper_channel_name">New wallpapers</string>

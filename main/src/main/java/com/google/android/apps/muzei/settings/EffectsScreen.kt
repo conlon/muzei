@@ -17,11 +17,15 @@
 package com.google.android.apps.muzei.settings
 
 import android.content.SharedPreferences
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -31,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
@@ -53,6 +58,7 @@ fun EffectsScreen(
     blurPref: String,
     dimPref: String,
     greyPref: String,
+    showAutoFraming: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val blur =
@@ -61,6 +67,9 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, dimPref, MuzeiBlurRenderer.DEFAULT_MAX_DIM)
     val grey =
         rememberPreferenceSourcedValue(prefs, greyPref, MuzeiBlurRenderer.DEFAULT_GREY)
+    val autoFraming = if (showAutoFraming) {
+        rememberPreferenceSourcedValue(prefs, Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
+    } else null
     EffectsScreen(
         blur = blur.value,
         onBlurChange = {
@@ -83,6 +92,8 @@ fun EffectsScreen(
         onGreyChangeFinished = {
             grey.userControlled = false
         },
+        autoFramingEnabled = autoFraming?.value,
+        onAutoFramingChange = autoFraming?.let { af -> { value: Boolean -> af.value = value } },
         modifier = modifier
     )
 }
@@ -98,17 +109,23 @@ fun EffectsScreen(
     grey: Int,
     onGreyChange: (Int) -> Unit,
     onGreyChangeFinished: (() -> Unit),
+    autoFramingEnabled: Boolean? = null,
+    onAutoFramingChange: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowSize = with(LocalDensity.current) {
         val pixelSize = LocalWindowInfo.current.containerSize
         DpSize(pixelSize.width.toDp(), pixelSize.height.toDp())
     }
-    if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
+    val gridModifier = if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
+        Modifier.wrapContentSize().sizeIn(maxWidth = 500.dp)
+    } else {
+        Modifier.wrapContentHeight().padding(horizontal = 32.dp)
+    }
+    val showAutoFraming = autoFramingEnabled != null && onAutoFramingChange != null
+    if (!showAutoFraming) {
         EffectsGrid(
-            modifier = modifier
-                .wrapContentSize()
-                .sizeIn(maxWidth = 500.dp),
+            modifier = modifier.then(gridModifier),
             blur = blur,
             onBlurChange = onBlurChange,
             onBlurChangeFinished = onBlurChangeFinished,
@@ -120,20 +137,48 @@ fun EffectsScreen(
             onGreyChangeFinished = onGreyChangeFinished,
         )
     } else {
-        EffectsGrid(
-            modifier = modifier
-                .wrapContentHeight()
-                .padding(horizontal = 32.dp),
-            blur = blur,
-            onBlurChange = onBlurChange,
-            onBlurChangeFinished = onBlurChangeFinished,
-            dim = dim,
-            onDimChange = onDimChange,
-            onDimChangeFinished = onDimChangeFinished,
-            grey = grey,
-            onGreyChange = onGreyChange,
-            onGreyChangeFinished = onGreyChangeFinished,
-        )
+        androidx.compose.foundation.layout.Column(
+            modifier = modifier,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            EffectsGrid(
+                modifier = gridModifier,
+                blur = blur,
+                onBlurChange = onBlurChange,
+                onBlurChangeFinished = onBlurChangeFinished,
+                dim = dim,
+                onDimChange = onDimChange,
+                onDimChangeFinished = onDimChangeFinished,
+                grey = grey,
+                onGreyChange = onGreyChange,
+                onGreyChangeFinished = onGreyChangeFinished,
+            )
+            Row(
+                modifier = (if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
+                    Modifier.sizeIn(maxWidth = 500.dp)
+                } else {
+                    Modifier.padding(horizontal = 32.dp)
+                }).fillMaxWidth().padding(top = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = autoFramingEnabled!!,
+                    onCheckedChange = onAutoFramingChange,
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color.White,
+                        uncheckedColor = Color.White,
+                        checkmarkColor = Color.Black
+                    )
+                )
+                Text(
+                    text = stringResource(R.string.settings_auto_framing_title),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
     }
 }
 
