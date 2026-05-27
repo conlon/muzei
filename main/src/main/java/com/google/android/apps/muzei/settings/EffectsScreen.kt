@@ -58,7 +58,9 @@ fun EffectsScreen(
     blurPref: String,
     dimPref: String,
     greyPref: String,
+    parallaxPref: String? = null,
     showAutoFraming: Boolean = false,
+    showFavoriteBoost: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val blur =
@@ -67,33 +69,33 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, dimPref, MuzeiBlurRenderer.DEFAULT_MAX_DIM)
     val grey =
         rememberPreferenceSourcedValue(prefs, greyPref, MuzeiBlurRenderer.DEFAULT_GREY)
+    val parallax = parallaxPref?.let {
+        rememberPreferenceSourcedValue(prefs, it, Prefs.DEFAULT_PARALLAX)
+    }
     val autoFraming = if (showAutoFraming) {
         rememberPreferenceSourcedValue(prefs, Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
     } else null
+    val favoriteBoost = if (showFavoriteBoost) {
+        rememberPreferenceSourcedValue(prefs, Prefs.PREF_FAVORITE_BOOST, Prefs.DEFAULT_FAVORITE_BOOST)
+    } else null
     EffectsScreen(
         blur = blur.value,
-        onBlurChange = {
-            blur.value = it
-        },
-        onBlurChangeFinished = {
-            blur.userControlled = false
-        },
+        onBlurChange = { blur.value = it },
+        onBlurChangeFinished = { blur.userControlled = false },
         dim = dim.value,
-        onDimChange = {
-            dim.value = it
-        },
-        onDimChangeFinished = {
-            dim.userControlled = false
-        },
+        onDimChange = { dim.value = it },
+        onDimChangeFinished = { dim.userControlled = false },
         grey = grey.value,
-        onGreyChange = {
-            grey.value = it
-        },
-        onGreyChangeFinished = {
-            grey.userControlled = false
-        },
+        onGreyChange = { grey.value = it },
+        onGreyChangeFinished = { grey.userControlled = false },
+        parallax = parallax?.value,
+        onParallaxChange = parallax?.let { p -> { value: Int -> p.value = value } },
+        onParallaxChangeFinished = parallax?.let { p -> { p.userControlled = false } },
         autoFramingEnabled = autoFraming?.value,
         onAutoFramingChange = autoFraming?.let { af -> { value: Boolean -> af.value = value } },
+        favoriteBoost = favoriteBoost?.value,
+        onFavoriteBoostChange = favoriteBoost?.let { fb -> { value: Int -> fb.value = value } },
+        onFavoriteBoostChangeFinished = favoriteBoost?.let { fb -> { fb.userControlled = false } },
         modifier = modifier
     )
 }
@@ -109,8 +111,14 @@ fun EffectsScreen(
     grey: Int,
     onGreyChange: (Int) -> Unit,
     onGreyChangeFinished: (() -> Unit),
+    parallax: Int? = null,
+    onParallaxChange: ((Int) -> Unit)? = null,
+    onParallaxChangeFinished: (() -> Unit)? = null,
     autoFramingEnabled: Boolean? = null,
     onAutoFramingChange: ((Boolean) -> Unit)? = null,
+    favoriteBoost: Int? = null,
+    onFavoriteBoostChange: ((Int) -> Unit)? = null,
+    onFavoriteBoostChangeFinished: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowSize = with(LocalDensity.current) {
@@ -123,18 +131,15 @@ fun EffectsScreen(
         Modifier.wrapContentHeight().padding(horizontal = 32.dp)
     }
     val showAutoFraming = autoFramingEnabled != null && onAutoFramingChange != null
-    if (!showAutoFraming) {
+    val hasExtras = showAutoFraming
+    if (!hasExtras) {
         EffectsGrid(
             modifier = modifier.then(gridModifier),
-            blur = blur,
-            onBlurChange = onBlurChange,
-            onBlurChangeFinished = onBlurChangeFinished,
-            dim = dim,
-            onDimChange = onDimChange,
-            onDimChangeFinished = onDimChangeFinished,
-            grey = grey,
-            onGreyChange = onGreyChange,
-            onGreyChangeFinished = onGreyChangeFinished,
+            blur = blur, onBlurChange = onBlurChange, onBlurChangeFinished = onBlurChangeFinished,
+            dim = dim, onDimChange = onDimChange, onDimChangeFinished = onDimChangeFinished,
+            grey = grey, onGreyChange = onGreyChange, onGreyChangeFinished = onGreyChangeFinished,
+            parallax = parallax, onParallaxChange = onParallaxChange, onParallaxChangeFinished = onParallaxChangeFinished,
+            favoriteBoost = favoriteBoost, onFavoriteBoostChange = onFavoriteBoostChange, onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
         )
     } else {
         androidx.compose.foundation.layout.Column(
@@ -144,15 +149,11 @@ fun EffectsScreen(
         ) {
             EffectsGrid(
                 modifier = gridModifier,
-                blur = blur,
-                onBlurChange = onBlurChange,
-                onBlurChangeFinished = onBlurChangeFinished,
-                dim = dim,
-                onDimChange = onDimChange,
-                onDimChangeFinished = onDimChangeFinished,
-                grey = grey,
-                onGreyChange = onGreyChange,
-                onGreyChangeFinished = onGreyChangeFinished,
+                blur = blur, onBlurChange = onBlurChange, onBlurChangeFinished = onBlurChangeFinished,
+                dim = dim, onDimChange = onDimChange, onDimChangeFinished = onDimChangeFinished,
+                grey = grey, onGreyChange = onGreyChange, onGreyChangeFinished = onGreyChangeFinished,
+                parallax = parallax, onParallaxChange = onParallaxChange, onParallaxChangeFinished = onParallaxChangeFinished,
+                favoriteBoost = favoriteBoost, onFavoriteBoostChange = onFavoriteBoostChange, onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
             )
             Row(
                 modifier = (if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
@@ -194,7 +195,16 @@ private fun EffectsGrid(
     grey: Int = MuzeiBlurRenderer.DEFAULT_GREY,
     onGreyChange: (Int) -> Unit = {},
     onGreyChangeFinished: (() -> Unit) = {},
+    parallax: Int? = null,
+    onParallaxChange: ((Int) -> Unit)? = null,
+    onParallaxChangeFinished: (() -> Unit)? = null,
+    favoriteBoost: Int? = null,
+    onFavoriteBoostChange: ((Int) -> Unit)? = null,
+    onFavoriteBoostChangeFinished: (() -> Unit)? = null,
 ) {
+    val showParallax = parallax != null && onParallaxChange != null
+    val showFavoriteBoost = favoriteBoost != null && onFavoriteBoostChange != null
+    val rowCount = 3 + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
     Layout(
         content = {
             // Titles
@@ -216,6 +226,22 @@ private fun EffectsGrid(
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
+            if (showParallax) {
+                Text(
+                    text = stringResource(R.string.settings_parallax_amount_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            if (showFavoriteBoost) {
+                Text(
+                    text = stringResource(R.string.settings_favorite_boost_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
             // Sliders
             Slider(
                 value = blur.toFloat(),
@@ -253,15 +279,43 @@ private fun EffectsGrid(
                     inactiveTrackColor = Color.DarkGray,
                 )
             )
+            if (showParallax) {
+                Slider(
+                    value = parallax!!.toFloat(),
+                    onValueChange = { onParallaxChange!!(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..100f,
+                    onValueChangeFinished = onParallaxChangeFinished,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.DarkGray,
+                    )
+                )
+            }
+            if (showFavoriteBoost) {
+                Slider(
+                    value = favoriteBoost!!.toFloat(),
+                    onValueChange = { onFavoriteBoostChange!!(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..100f,
+                    onValueChangeFinished = onFavoriteBoostChangeFinished,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.DarkGray,
+                    )
+                )
+            }
         },
         modifier = modifier
     ) { measurables, constraints ->
-        val titlePlaceables = measurables.take(3).map { measurable ->
+        val titlePlaceables = measurables.take(rowCount).map { measurable ->
             measurable.measure(constraints.copy(minWidth = 0))
         }
         val maxTitleWidth = titlePlaceables.maxOf { it.width }
         val spacing = 16.dp.roundToPx()
-        val sliderPlaceables = measurables.takeLast(3).map { measurable ->
+        val sliderPlaceables = measurables.takeLast(rowCount).map { measurable ->
             measurable.measure(
                 constraints.copy(
                     minWidth = constraints.maxWidth - maxTitleWidth - spacing,
@@ -275,7 +329,7 @@ private fun EffectsGrid(
         val maxColumnHeight = columnHeights.max()
 
         val layoutWidth = constraints.maxWidth
-        val layoutHeight = maxColumnHeight * 3
+        val layoutHeight = maxColumnHeight * rowCount
         layout(layoutWidth, layoutHeight) {
             titlePlaceables.forEachIndexed { index, titlePlaceable ->
                 val height = titlePlaceable.height

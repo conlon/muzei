@@ -33,6 +33,8 @@ object Prefs {
     const val PREF_TAP_ACTION_NEXT = "next"
     const val PREF_TAP_ACTION_VIEW_DETAILS = "view_details"
     const val PREF_TAP_ACTION_NONE = "none"
+    const val PREF_PARALLAX_AMOUNT = "parallax_amount"
+    const val DEFAULT_PARALLAX = 100
     const val PREF_GREY_AMOUNT = "grey_amount"
     const val PREF_DIM_AMOUNT = "dim_amount"
     const val PREF_BLUR_AMOUNT = "blur_amount"
