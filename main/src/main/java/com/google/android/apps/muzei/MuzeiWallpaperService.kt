@@ -158,6 +158,7 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
         private var validDoubleTap: Boolean = false
         private var lastTwoFingerTap = 0L
         private var lastThreeFingerTap = 0L
+        private var untilLockUnblur = false
 
         private val engineLifecycle = LifecycleRegistry(this)
 
@@ -283,6 +284,12 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
         }
 
         fun lockScreenVisibleChanged(isLockScreenVisible: Boolean) {
+            if (isLockScreenVisible && untilLockUnblur) {
+                untilLockUnblur = false
+                queueEvent {
+                    renderer.setIsBlurred(isBlurred = true, artDetailMode = false)
+                }
+            }
             if (!EffectsLockScreenOpen.value) {
                 renderController.onLockScreen = isLockScreenVisible
             }
@@ -408,9 +415,16 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
                 return
             }
 
+            val durationSeconds = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
+                    .getInt(Prefs.PREF_TEMP_FOCUS_DURATION, Prefs.DEFAULT_TEMP_FOCUS_DURATION)
+            if (durationSeconds == Prefs.TEMP_FOCUS_UNTIL_LOCK) {
+                untilLockUnblur = true
+                return
+            }
+
             cancelDelayedBlur()
             delayedBlur = lifecycleScope.launch {
-                delay(TEMPORARY_FOCUS_DURATION_MILLIS)
+                delay(durationSeconds * 1000L)
                 queueEvent {
                     renderer.setIsBlurred(isBlurred = true, artDetailMode = false)
                 }

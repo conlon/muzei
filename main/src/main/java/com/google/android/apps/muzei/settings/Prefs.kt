@@ -36,6 +36,9 @@ object Prefs {
     const val PREF_TAP_ACTION_NONE = "none"
     const val PREF_PARALLAX_AMOUNT = "parallax_amount"
     const val DEFAULT_PARALLAX = 100
+    const val PREF_TEMP_FOCUS_DURATION = "temp_focus_duration"
+    const val DEFAULT_TEMP_FOCUS_DURATION = 3
+    const val TEMP_FOCUS_UNTIL_LOCK = -1
     const val PREF_GREY_AMOUNT = "grey_amount"
     const val PREF_DIM_AMOUNT = "dim_amount"
     const val PREF_BLUR_AMOUNT = "blur_amount"

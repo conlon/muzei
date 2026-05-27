@@ -118,6 +118,8 @@
     <string name="gestures_three_finger_tap_title">Three Finger Tap</string>
     <string name="gestures_three_finger_tap_description">Tap the blurred wallpaper on your home screen with three fingers to trigger the action of your choice.</string>
     <string name="gestures_tap_action_temporary_disable">Temporarily disable effects</string>
+    <string name="gestures_focus_duration_label">Duration: %s</string>
+    <string name="gestures_focus_duration_until_lock">Until lock</string>
     <string name="gestures_tap_action_next">Next Artwork</string>
     <string name="gestures_tap_action_view_details">View Artwork Details</string>
     <string name="gestures_tap_action_none">None</string>

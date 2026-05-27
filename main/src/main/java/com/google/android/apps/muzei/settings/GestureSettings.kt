@@ -16,6 +16,7 @@
 
 package com.google.android.apps.muzei.settings
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,9 +30,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +54,41 @@ import com.google.android.apps.muzei.util.RadioButtonSectionHeader
 import com.google.android.apps.muzei.util.only
 import net.nurik.roman.muzei.R
 
+private val DURATION_STEPS = listOf(3, 5, 10, 15, 20, 30, 45, 60, -1)
+
+@Composable
+private fun FocusDurationSlider(
+    durationSeconds: Int,
+    onDurationChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val stepIndex = DURATION_STEPS.indexOf(durationSeconds).let { if (it < 0) 0 else it }
+    val label = if (durationSeconds == -1) {
+        stringResource(R.string.gestures_focus_duration_until_lock)
+    } else {
+        stringResource(R.string.gestures_focus_duration_label, "${durationSeconds}s")
+    }
+    Column(modifier = modifier.padding(start = 48.dp, end = 16.dp, bottom = 8.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Slider(
+            value = stepIndex.toFloat(),
+            onValueChange = { onDurationChange(DURATION_STEPS[it.toInt()]) },
+            valueRange = 0f..(DURATION_STEPS.size - 1).toFloat(),
+            steps = DURATION_STEPS.size - 2,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color.DarkGray,
+            )
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GestureSettings(
@@ -58,6 +98,8 @@ fun GestureSettings(
     onTwoFingerSelectedOptionChange: (String) -> Unit,
     threeFingerSelectedOption: String,
     onThreeFingerSelectedOptionChange: (String) -> Unit,
+    focusDurationSeconds: Int = Prefs.DEFAULT_TEMP_FOCUS_DURATION,
+    onFocusDurationChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
     onUp: () -> Unit = {},
 ) {
@@ -104,8 +146,16 @@ fun GestureSettings(
                 options = gestureOptions,
                 selectedOption = doubleTapSelectedOption,
                 onOptionSelected = onDoubleTapSelectedOptionChange,
-                modifier = Modifier.padding(bottom = 16.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
             )
+            val tempDisableLabel = gestureOptions[0]
+            AnimatedVisibility(visible = doubleTapSelectedOption == tempDisableLabel) {
+                FocusDurationSlider(
+                    durationSeconds = focusDurationSeconds,
+                    onDurationChange = onFocusDurationChange,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+            }
             RadioButtonSectionHeader(
                 title = stringResource(R.string.gestures_two_finger_tap_title),
                 description = stringResource(R.string.gestures_two_finger_tap_description)
@@ -124,8 +174,15 @@ fun GestureSettings(
                 options = gestureOptions,
                 selectedOption = threeFingerSelectedOption,
                 onOptionSelected = onThreeFingerSelectedOptionChange,
-                modifier = Modifier.padding(bottom = 16.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
             )
+            AnimatedVisibility(visible = threeFingerSelectedOption == tempDisableLabel) {
+                FocusDurationSlider(
+                    durationSeconds = focusDurationSeconds,
+                    onDurationChange = onFocusDurationChange,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+            }
         }
     }
 }
@@ -147,6 +204,7 @@ fun GestureSettingsPreview() {
         var twoFingerSelectedOption by remember { mutableStateOf(defaultTwoFingerOption) }
         val defaultThreeFingerOption = stringResource(R.string.gestures_tap_action_none)
         var threeFingerSelectedOption by remember { mutableStateOf(defaultThreeFingerOption) }
+        var focusDuration by remember { mutableStateOf(Prefs.DEFAULT_TEMP_FOCUS_DURATION) }
         GestureSettings(
             doubleTapSelectedOption = doubleTapSelectedOption,
             onDoubleTapSelectedOptionChange = { doubleTapSelectedOption = it },
@@ -154,6 +212,8 @@ fun GestureSettingsPreview() {
             onTwoFingerSelectedOptionChange = { twoFingerSelectedOption = it },
             threeFingerSelectedOption = threeFingerSelectedOption,
             onThreeFingerSelectedOptionChange = { threeFingerSelectedOption = it },
+            focusDurationSeconds = focusDuration,
+            onFocusDurationChange = { focusDuration = it },
             modifier = Modifier.fillMaxSize(),
         )
     }
