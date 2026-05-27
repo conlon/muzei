@@ -77,6 +77,10 @@ class GesturesFragment : Fragment() {
                 prefToStringMapper(threeFingerValue)
             }
             var threeFingerSelectedOption by remember { mutableStateOf(defaultThreeFingerOption) }
+            var focusDuration by remember {
+                mutableStateOf(prefs.getInt(Prefs.PREF_TEMP_FOCUS_DURATION,
+                    Prefs.DEFAULT_TEMP_FOCUS_DURATION))
+            }
             GestureSettings(
                 doubleTapSelectedOption = doubleTapSelectedOption,
                 onDoubleTapSelectedOptionChange = { selectedOption ->
@@ -91,6 +95,11 @@ class GesturesFragment : Fragment() {
                         putString(Prefs.PREF_THREE_FINGER_TAP, stringToPrefMapper(selectedOption))
                     }
                     threeFingerSelectedOption = selectedOption
+                },
+                focusDurationSeconds = focusDuration,
+                onFocusDurationChange = { duration ->
+                    prefs.edit { putInt(Prefs.PREF_TEMP_FOCUS_DURATION, duration) }
+                    focusDuration = duration
                 },
                 onUp = {
                     val navController = findNavController()
