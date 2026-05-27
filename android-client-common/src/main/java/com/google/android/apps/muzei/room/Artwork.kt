@@ -56,6 +56,9 @@ data class Artwork(
     @ColumnInfo(name = "date_added")
     var dateAdded = Date()
 
+    @ColumnInfo(name = "is_favorite", defaultValue = "0")
+    var isFavorite: Boolean = false
+
     companion object {
 
         fun getContentUri(id: Long): Uri {

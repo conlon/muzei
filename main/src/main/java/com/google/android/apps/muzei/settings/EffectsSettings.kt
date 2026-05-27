@@ -143,6 +143,7 @@ fun EffectsSettings(
                 blurPref = blurPref,
                 dimPref = dimPref,
                 greyPref = greyPref,
+                showFavoriteBoost = page == 0,
                 modifier = Modifier.fillMaxSize(),
             )
         }

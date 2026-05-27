@@ -53,6 +53,7 @@ fun EffectsScreen(
     blurPref: String,
     dimPref: String,
     greyPref: String,
+    showFavoriteBoost: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val blur =
@@ -61,6 +62,9 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, dimPref, MuzeiBlurRenderer.DEFAULT_MAX_DIM)
     val grey =
         rememberPreferenceSourcedValue(prefs, greyPref, MuzeiBlurRenderer.DEFAULT_GREY)
+    val favoriteBoost = if (showFavoriteBoost) {
+        rememberPreferenceSourcedValue(prefs, Prefs.PREF_FAVORITE_BOOST, Prefs.DEFAULT_FAVORITE_BOOST)
+    } else null
     EffectsScreen(
         blur = blur.value,
         onBlurChange = {
@@ -83,6 +87,9 @@ fun EffectsScreen(
         onGreyChangeFinished = {
             grey.userControlled = false
         },
+        favoriteBoost = favoriteBoost?.value,
+        onFavoriteBoostChange = favoriteBoost?.let { fb -> { value: Int -> fb.value = value } },
+        onFavoriteBoostChangeFinished = favoriteBoost?.let { fb -> { fb.userControlled = false } },
         modifier = modifier
     )
 }
@@ -98,6 +105,9 @@ fun EffectsScreen(
     grey: Int,
     onGreyChange: (Int) -> Unit,
     onGreyChangeFinished: (() -> Unit),
+    favoriteBoost: Int? = null,
+    onFavoriteBoostChange: ((Int) -> Unit)? = null,
+    onFavoriteBoostChangeFinished: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowSize = with(LocalDensity.current) {
@@ -118,6 +128,9 @@ fun EffectsScreen(
             grey = grey,
             onGreyChange = onGreyChange,
             onGreyChangeFinished = onGreyChangeFinished,
+            favoriteBoost = favoriteBoost,
+            onFavoriteBoostChange = onFavoriteBoostChange,
+            onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
         )
     } else {
         EffectsGrid(
@@ -133,6 +146,9 @@ fun EffectsScreen(
             grey = grey,
             onGreyChange = onGreyChange,
             onGreyChangeFinished = onGreyChangeFinished,
+            favoriteBoost = favoriteBoost,
+            onFavoriteBoostChange = onFavoriteBoostChange,
+            onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
         )
     }
 }
@@ -149,7 +165,12 @@ private fun EffectsGrid(
     grey: Int = MuzeiBlurRenderer.DEFAULT_GREY,
     onGreyChange: (Int) -> Unit = {},
     onGreyChangeFinished: (() -> Unit) = {},
+    favoriteBoost: Int? = null,
+    onFavoriteBoostChange: ((Int) -> Unit)? = null,
+    onFavoriteBoostChangeFinished: (() -> Unit)? = null,
 ) {
+    val showFavoriteBoost = favoriteBoost != null && onFavoriteBoostChange != null
+    val rowCount = if (showFavoriteBoost) 4 else 3
     Layout(
         content = {
             // Titles
@@ -171,6 +192,14 @@ private fun EffectsGrid(
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
+            if (showFavoriteBoost) {
+                Text(
+                    text = stringResource(R.string.settings_favorite_boost_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
             // Sliders
             Slider(
                 value = blur.toFloat(),
@@ -208,15 +237,29 @@ private fun EffectsGrid(
                     inactiveTrackColor = Color.DarkGray,
                 )
             )
+            if (showFavoriteBoost) {
+                Slider(
+                    value = favoriteBoost!!.toFloat(),
+                    onValueChange = { onFavoriteBoostChange!!(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..100f,
+                    onValueChangeFinished = onFavoriteBoostChangeFinished,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color.DarkGray,
+                    )
+                )
+            }
         },
         modifier = modifier
     ) { measurables, constraints ->
-        val titlePlaceables = measurables.take(3).map { measurable ->
+        val titlePlaceables = measurables.take(rowCount).map { measurable ->
             measurable.measure(constraints.copy(minWidth = 0))
         }
         val maxTitleWidth = titlePlaceables.maxOf { it.width }
         val spacing = 16.dp.roundToPx()
-        val sliderPlaceables = measurables.takeLast(3).map { measurable ->
+        val sliderPlaceables = measurables.takeLast(rowCount).map { measurable ->
             measurable.measure(
                 constraints.copy(
                     minWidth = constraints.maxWidth - maxTitleWidth - spacing,
@@ -230,7 +273,7 @@ private fun EffectsGrid(
         val maxColumnHeight = columnHeights.max()
 
         val layoutWidth = constraints.maxWidth
-        val layoutHeight = maxColumnHeight * 3
+        val layoutHeight = maxColumnHeight * rowCount
         layout(layoutWidth, layoutHeight) {
             titlePlaceables.forEachIndexed { index, titlePlaceable ->
                 val height = titlePlaceable.height

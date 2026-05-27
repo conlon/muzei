@@ -147,6 +147,15 @@
             android:contentDescription="@string/action_next_artwork"
             android:visibility="gone"/>
 
+        <ImageButton
+            android:id="@+id/favorite"
+            android:layout_width="@dimen/art_detail_button_width"
+            android:layout_height="@dimen/art_detail_button_height"
+            android:background="?selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_star_outline"
+            android:scaleType="center"
+            android:contentDescription="@string/action_favorite"/>
+
         <androidx.appcompat.widget.ActionMenuView
             android:id="@+id/overflow_menu"
             android:layout_width="wrap_content"

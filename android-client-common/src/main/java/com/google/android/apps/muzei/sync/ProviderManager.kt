@@ -308,6 +308,23 @@ class ProviderManager private constructor(private val context: Context)
     }
 
     fun nextArtwork() {
-        ArtworkLoadWorker.enqueueNext(context)
+        val prefs = androidx.core.content.ContextCompat
+                .createDeviceProtectedStorageContext(context)
+                ?.getSharedPreferences("wallpaper_preferences", Context.MODE_PRIVATE)
+                ?: context.getSharedPreferences("wallpaper_preferences", Context.MODE_PRIVATE)
+        val favoriteBoost = prefs.getInt("favorite_boost", 0)
+        if (favoriteBoost > 0 && (Math.random() * 100) < favoriteBoost) {
+            GlobalScope.launch {
+                val database = MuzeiDatabase.getInstance(context)
+                val favorite = database.artworkDao().getRandomFavorite()
+                if (favorite != null) {
+                    database.artworkDao().updateDateAdded(favorite.id, System.currentTimeMillis())
+                    return@launch
+                }
+                ArtworkLoadWorker.enqueueNext(context)
+            }
+        } else {
+            ArtworkLoadWorker.enqueueNext(context)
+        }
     }
 }

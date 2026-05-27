@@ -84,6 +84,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -110,6 +111,16 @@ class ArtDetailViewModel(application: Application) : AndroidViewModel(applicatio
 
     val currentArtwork = database.artworkDao().getCurrentArtworkFlow()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), null)
+
+    val currentArtworkIsFavorite = database.artworkDao().getCurrentArtworkFlow()
+            .map { it?.isFavorite == true }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
+
+    fun toggleFavorite(artworkId: Long, currentlyFavorite: Boolean) {
+        viewModelScope.launch {
+            database.artworkDao().setFavorite(artworkId, !currentlyFavorite)
+        }
+    }
 }
 
 class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
@@ -245,6 +256,11 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
             showFakeLoading()
         }
         TooltipCompat.setTooltipText(binding.nextArtwork, binding.nextArtwork.contentDescription)
+
+        binding.favorite.setOnClickListener {
+            val artwork = viewModel.currentArtwork.value ?: return@setOnClickListener
+            viewModel.toggleFavorite(artwork.id, viewModel.currentArtworkIsFavorite.value)
+        }
 
         // Ensure that when the view state is saved, the SubsamplingScaleImageView also
         // has its state saved
@@ -419,6 +435,15 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
             }
             showFakeLoading = false
             updateLoadingSpinnerVisibility()
+        }
+
+        viewModel.currentArtworkIsFavorite.collectIn(viewLifecycleOwner) { isFavorite ->
+            binding.favorite.setImageResource(
+                    if (isFavorite) R.drawable.ic_star_filled
+                    else R.drawable.ic_star_outline)
+            binding.favorite.contentDescription = getString(
+                    if (isFavorite) R.string.action_unfavorite
+                    else R.string.action_favorite)
         }
     }
 

@@ -39,6 +39,8 @@ object Prefs {
     const val PREF_LOCK_GREY_AMOUNT = "lock_grey_amount"
     const val PREF_LOCK_DIM_AMOUNT = "lock_dim_amount"
     const val PREF_LOCK_BLUR_AMOUNT = "lock_blur_amount"
+    const val PREF_FAVORITE_BOOST = "favorite_boost"
+    const val DEFAULT_FAVORITE_BOOST = 0
     const val PREF_LINK_EFFECTS = "link_effects"
     private const val PREF_DISABLE_BLUR_WHEN_LOCKED = "disable_blur_when_screen_locked_enabled"
 

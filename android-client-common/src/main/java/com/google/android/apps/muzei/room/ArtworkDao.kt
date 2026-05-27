@@ -81,6 +81,20 @@ abstract class ArtworkDao {
         WHERE title LIKE :query OR byline LIKE :query OR attribution LIKE :query""")
     abstract suspend fun searchArtwork(query: String): List<Artwork>
 
+    @Query("UPDATE artwork SET is_favorite = :isFavorite WHERE _id = :id")
+    abstract suspend fun setFavorite(id: Long, isFavorite: Boolean)
+
+    @Query("""
+        SELECT artwork.* FROM artwork
+        inner join provider on providerAuthority = authority
+        WHERE is_favorite = 1
+        ORDER BY RANDOM()
+        LIMIT 1""")
+    abstract suspend fun getRandomFavorite(): Artwork?
+
+    @Query("UPDATE artwork SET date_added = :dateMillis WHERE _id = :id")
+    abstract suspend fun updateDateAdded(id: Long, dateMillis: Long)
+
     @Query("DELETE FROM artwork WHERE _id=:id")
     abstract fun deleteById(id: Long)
 }
