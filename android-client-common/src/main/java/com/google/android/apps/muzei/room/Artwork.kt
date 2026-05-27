@@ -72,6 +72,9 @@ data class Artwork(
         get() = savedViewportLeft != null && savedViewportTop != null
                 && savedViewportRight != null && savedViewportBottom != null
 
+    @ColumnInfo(name = "is_favorite", defaultValue = "0")
+    var isFavorite: Boolean = false
+
     companion object {
 
         fun getContentUri(id: Long): Uri {

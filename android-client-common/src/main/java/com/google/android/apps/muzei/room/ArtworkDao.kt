@@ -98,6 +98,17 @@ abstract class ArtworkDao {
         bottom: Float?
     )
 
+    @Query("UPDATE artwork SET is_favorite = :isFavorite WHERE _id = :id")
+    abstract suspend fun setFavorite(id: Long, isFavorite: Boolean)
+
+    @Query("""
+        SELECT artwork.* FROM artwork
+        inner join provider on providerAuthority = authority
+        WHERE is_favorite = 1
+        ORDER BY RANDOM()
+        LIMIT 1""")
+    abstract suspend fun getRandomFavorite(): Artwork?
+
     @Query("DELETE FROM artwork WHERE _id=:id")
     abstract fun deleteById(id: Long)
 }

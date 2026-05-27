@@ -381,6 +381,7 @@ abstract class MuzeiDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE artwork ADD COLUMN saved_viewport_top REAL")
                 db.execSQL("ALTER TABLE artwork ADD COLUMN saved_viewport_right REAL")
                 db.execSQL("ALTER TABLE artwork ADD COLUMN saved_viewport_bottom REAL")
+                db.execSQL("ALTER TABLE artwork ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

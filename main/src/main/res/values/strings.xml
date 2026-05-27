@@ -25,6 +25,10 @@
     <string name="settings_grey_amount_title">Grey</string>
     <string name="settings_parallax_amount_title">Parallax</string>
     <string name="settings_auto_framing_title">Auto-frame subjects</string>
+    <string name="settings_favorite_boost_title">Favorites</string>
+
+    <string name="action_favorite">Favorite</string>
+    <string name="action_unfavorite">Unfavorite</string>
 
     <string name="notification_new_wallpaper">New wallpaper</string>
     <string name="notification_new_wallpaper_channel_name">New wallpapers</string>

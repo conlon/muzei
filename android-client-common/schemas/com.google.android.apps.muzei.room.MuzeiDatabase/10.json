@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 10,
-    "identityHash": "4905edb8615fcb0243fd8ff65e5a0fe1",
+    "identityHash": "7a3dac1ded1b79a0e5474780af88c0c3",
     "entities": [
       {
         "tableName": "Artwork",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`imageUri` TEXT NOT NULL, `_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerAuthority` TEXT NOT NULL, `title` TEXT, `byline` TEXT, `attribution` TEXT, `metaFont` TEXT NOT NULL, `date_added` INTEGER NOT NULL, `saved_viewport_left` REAL, `saved_viewport_top` REAL, `saved_viewport_right` REAL, `saved_viewport_bottom` REAL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`imageUri` TEXT NOT NULL, `_id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerAuthority` TEXT NOT NULL, `title` TEXT, `byline` TEXT, `attribution` TEXT, `metaFont` TEXT NOT NULL, `date_added` INTEGER NOT NULL, `saved_viewport_left` REAL, `saved_viewport_top` REAL, `saved_viewport_right` REAL, `saved_viewport_bottom` REAL, `is_favorite` INTEGER NOT NULL DEFAULT 0)",
         "fields": [
           {
             "fieldPath": "imageUri",
@@ -72,6 +72,13 @@
             "fieldPath": "savedViewportBottom",
             "columnName": "saved_viewport_bottom",
             "affinity": "REAL"
+          },
+          {
+            "fieldPath": "isFavorite",
+            "columnName": "is_favorite",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -119,7 +126,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4905edb8615fcb0243fd8ff65e5a0fe1')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7a3dac1ded1b79a0e5474780af88c0c3')"
     ]
   }
 }
