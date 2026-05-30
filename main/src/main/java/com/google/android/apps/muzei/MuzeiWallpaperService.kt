@@ -158,6 +158,9 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
         private var validDoubleTap: Boolean = false
         private var lastTwoFingerTap = 0L
         private var lastThreeFingerTap = 0L
+        private var twoFingerDownTime = 0L
+        private var threeFingerDownTime = 0L
+        private var gestureMaxPointerCount = 0
         private var untilLockUnblur = false
 
         private val engineLifecycle = LifecycleRegistry(this)
@@ -393,22 +396,54 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
             if (ArtDetailOpen.value) {
                 return
             }
-            val now = SystemClock.elapsedRealtime()
-            if (event.pointerCount == 2
-                && now - lastTwoFingerTap > TWO_FINGER_TAP_INTERVAL_MS) {
-                lastTwoFingerTap = now
-                val prefs = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
-                val twoFingerTapValue = prefs.getString(Prefs.PREF_TWO_FINGER_TAP,
-                        null) ?: Prefs.PREF_TAP_ACTION_NONE
-                triggerTapAction(twoFingerTapValue, "gesture_two_finger")
-            }
-            if (event.pointerCount == 3
-                && now - lastThreeFingerTap > THREE_FINGER_TAP_INTERVAL_MS) {
-                lastThreeFingerTap = now
-                val prefs = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
-                val threeFingerTapValue = prefs.getString(Prefs.PREF_THREE_FINGER_TAP,
-                        null) ?: Prefs.PREF_TAP_ACTION_NONE
-                triggerTapAction(threeFingerTapValue, "gesture_three_finger")
+            // A real "tap" is a brief press-and-release. We mark when the Nth finger lands, and
+            // fire only on the matching POINTER_UP, gated on long-press timeout so a hold (e.g.
+            // a pinch-to-zoom that briefly transits through a 2-pointer state) doesn't count.
+            val tapTimeout = ViewConfiguration.getLongPressTimeout().toLong()
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    gestureMaxPointerCount = 1
+                    twoFingerDownTime = 0L
+                    threeFingerDownTime = 0L
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    val count = event.pointerCount
+                    if (count > gestureMaxPointerCount) gestureMaxPointerCount = count
+                    val downAt = SystemClock.elapsedRealtime()
+                    if (count == 2) twoFingerDownTime = downAt
+                    if (count == 3) threeFingerDownTime = downAt
+                }
+                MotionEvent.ACTION_POINTER_UP -> {
+                    val countAfter = event.pointerCount - 1
+                    val now = SystemClock.elapsedRealtime()
+                    if (countAfter == 1
+                            && gestureMaxPointerCount == 2
+                            && twoFingerDownTime > 0L
+                            && now - twoFingerDownTime <= tapTimeout
+                            && now - lastTwoFingerTap > TWO_FINGER_TAP_INTERVAL_MS) {
+                        lastTwoFingerTap = now
+                        val prefs = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
+                        val twoFingerTapValue = prefs.getString(Prefs.PREF_TWO_FINGER_TAP,
+                                null) ?: Prefs.PREF_TAP_ACTION_NONE
+                        triggerTapAction(twoFingerTapValue, "gesture_two_finger")
+                    }
+                    if (countAfter == 2
+                            && gestureMaxPointerCount == 3
+                            && threeFingerDownTime > 0L
+                            && now - threeFingerDownTime <= tapTimeout
+                            && now - lastThreeFingerTap > THREE_FINGER_TAP_INTERVAL_MS) {
+                        lastThreeFingerTap = now
+                        val prefs = Prefs.getSharedPreferences(this@MuzeiWallpaperService)
+                        val threeFingerTapValue = prefs.getString(Prefs.PREF_THREE_FINGER_TAP,
+                                null) ?: Prefs.PREF_TAP_ACTION_NONE
+                        triggerTapAction(threeFingerTapValue, "gesture_three_finger")
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    gestureMaxPointerCount = 0
+                    twoFingerDownTime = 0L
+                    threeFingerDownTime = 0L
+                }
             }
         }
 
