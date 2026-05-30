@@ -387,6 +387,12 @@ class MuzeiWallpaperService : GLWallpaperService(), LifecycleOwner {
             gestureDetector.onTouchEvent(event)
             // Delay blur from temporary refocus while touching the screen
             delayedBlur()
+            // Multi-finger gestures should only fire on the home screen, not when the user is
+            // interacting with the in-app framing UI (which renders the wallpaper behind it via
+            // android:windowShowWallpaper and forwards touch events here).
+            if (ArtDetailOpen.value) {
+                return
+            }
             val now = SystemClock.elapsedRealtime()
             if (event.pointerCount == 2
                 && now - lastTwoFingerTap > TWO_FINGER_TAP_INTERVAL_MS) {
