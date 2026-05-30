@@ -443,9 +443,14 @@ class MuzeiBlurRenderer(
 
             val saved = savedViewport
             if (saved != null) {
+                // Use the saved viewport as the parallax center: at normalOffsetX = 0.5 the
+                // viewport sits exactly at the saved framing; otherwise slide it horizontally,
+                // symmetrically clamped so it never runs off the image.
+                val panExtent = min(saved.left, 1f - saved.right)
+                val shift = (normalOffsetX - 0.5f) * 2f * panExtent
                 currentViewport.apply {
-                    left = interpolate(-1f, 1f, saved.left)
-                    right = interpolate(-1f, 1f, saved.right)
+                    left = interpolate(-1f, 1f, saved.left + shift)
+                    right = interpolate(-1f, 1f, saved.right + shift)
                     top = interpolate(1f, -1f, saved.top)
                     bottom = interpolate(1f, -1f, saved.bottom)
                 }
