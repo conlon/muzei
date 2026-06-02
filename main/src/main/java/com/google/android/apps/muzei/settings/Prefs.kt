@@ -39,6 +39,12 @@ object Prefs {
     const val PREF_LOCK_GREY_AMOUNT = "lock_grey_amount"
     const val PREF_LOCK_DIM_AMOUNT = "lock_dim_amount"
     const val PREF_LOCK_BLUR_AMOUNT = "lock_blur_amount"
+    const val PREF_EFFECT_MODE = "effect_mode"
+    const val PREF_LOCK_EFFECT_MODE = "lock_effect_mode"
+    const val PREF_MOSAIC_AMOUNT = "mosaic_amount"
+    const val PREF_LOCK_MOSAIC_AMOUNT = "lock_mosaic_amount"
+    const val EFFECT_MODE_BLUR = "blur"
+    const val EFFECT_MODE_MOSAIC = "mosaic"
     const val PREF_LINK_EFFECTS = "link_effects"
     private const val PREF_DISABLE_BLUR_WHEN_LOCKED = "disable_blur_when_screen_locked_enabled"
 

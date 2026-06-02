@@ -80,6 +80,27 @@ fun rememberPreferenceSourcedValue(
 }
 
 @Composable
+fun rememberPreferenceSourcedStringValue(
+    prefs: SharedPreferences,
+    prefName: String,
+    defaultValue: String,
+): PreferenceSourcedValue<String> {
+    return rememberPreferenceSourcedValue(
+        prefs = prefs,
+        prefName = prefName,
+        defaultValue = defaultValue,
+        getValue = { prefs, prefName, defaultValue ->
+            prefs.getString(prefName, defaultValue) ?: defaultValue
+        },
+        updateValue = { prefName, newValue ->
+            prefs.edit {
+                putString(prefName, newValue)
+            }
+        }
+    )
+}
+
+@Composable
 fun rememberPreferenceSourcedValue(
     prefs: SharedPreferences,
     prefName: String,

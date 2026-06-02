@@ -138,11 +138,17 @@ fun EffectsSettings(
             val blurPref = if (page == 0) Prefs.PREF_BLUR_AMOUNT else Prefs.PREF_LOCK_BLUR_AMOUNT
             val dimPref = if (page == 0) Prefs.PREF_DIM_AMOUNT else Prefs.PREF_LOCK_DIM_AMOUNT
             val greyPref = if (page == 0) Prefs.PREF_GREY_AMOUNT else Prefs.PREF_LOCK_GREY_AMOUNT
+            val effectModePref = if (page == 0) Prefs.PREF_EFFECT_MODE
+                else Prefs.PREF_LOCK_EFFECT_MODE
+            val mosaicPref = if (page == 0) Prefs.PREF_MOSAIC_AMOUNT
+                else Prefs.PREF_LOCK_MOSAIC_AMOUNT
             EffectsScreen(
                 prefs = prefs,
                 blurPref = blurPref,
                 dimPref = dimPref,
                 greyPref = greyPref,
+                effectModePref = effectModePref,
+                mosaicPref = mosaicPref,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -249,6 +255,58 @@ private fun EffectsSettingsActions(
                     }
                 }
             }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_MOSAIC_AMOUNT,
+                    MuzeiBlurRenderer.DEFAULT_MOSAIC,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putInt(Prefs.PREF_LOCK_MOSAIC_AMOUNT, newValue)
+                    }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_MOSAIC_AMOUNT,
+                    MuzeiBlurRenderer.DEFAULT_MOSAIC,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putInt(Prefs.PREF_MOSAIC_AMOUNT, newValue)
+                    }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_EFFECT_MODE,
+                    MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getString(prefName, defaultValue) ?: defaultValue
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putString(Prefs.PREF_LOCK_EFFECT_MODE, newValue)
+                    }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_EFFECT_MODE,
+                    MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getString(prefName, defaultValue) ?: defaultValue
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putString(Prefs.PREF_EFFECT_MODE, newValue)
+                    }
+                }
+            }
         }
     }
 
@@ -287,6 +345,20 @@ private fun EffectsSettingsActions(
                             MuzeiBlurRenderer.DEFAULT_GREY
                         )
                     )
+                    putInt(
+                        Prefs.PREF_LOCK_MOSAIC_AMOUNT,
+                        prefs.getInt(
+                            Prefs.PREF_MOSAIC_AMOUNT,
+                            MuzeiBlurRenderer.DEFAULT_MOSAIC
+                        )
+                    )
+                    putString(
+                        Prefs.PREF_LOCK_EFFECT_MODE,
+                        prefs.getString(
+                            Prefs.PREF_EFFECT_MODE,
+                            MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
+                        )
+                    )
                 }
             } else {
                 // Update the home screen effects to match the lock screen
@@ -310,6 +382,20 @@ private fun EffectsSettingsActions(
                         prefs.getInt(
                             Prefs.PREF_LOCK_GREY_AMOUNT,
                             MuzeiBlurRenderer.DEFAULT_GREY
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_MOSAIC_AMOUNT,
+                        prefs.getInt(
+                            Prefs.PREF_LOCK_MOSAIC_AMOUNT,
+                            MuzeiBlurRenderer.DEFAULT_MOSAIC
+                        )
+                    )
+                    putString(
+                        Prefs.PREF_EFFECT_MODE,
+                        prefs.getString(
+                            Prefs.PREF_LOCK_EFFECT_MODE,
+                            MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
                         )
                     )
                 }
@@ -378,6 +464,22 @@ private fun EffectsSettingsActions(
                     putInt(
                         Prefs.PREF_LOCK_GREY_AMOUNT,
                         MuzeiBlurRenderer.DEFAULT_GREY
+                    )
+                    putInt(
+                        Prefs.PREF_MOSAIC_AMOUNT,
+                        MuzeiBlurRenderer.DEFAULT_MOSAIC
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_MOSAIC_AMOUNT,
+                        MuzeiBlurRenderer.DEFAULT_MOSAIC
+                    )
+                    putString(
+                        Prefs.PREF_EFFECT_MODE,
+                        MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
+                    )
+                    putString(
+                        Prefs.PREF_LOCK_EFFECT_MODE,
+                        MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
                     )
                 }
             }

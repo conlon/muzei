@@ -23,6 +23,9 @@
     <string name="settings_blur_amount_title">Blur</string>
     <string name="settings_dim_amount_title">Dim</string>
     <string name="settings_grey_amount_title">Grey</string>
+    <string name="settings_mosaic_amount_title">Tile size</string>
+    <string name="settings_effect_mode_blur">Blur</string>
+    <string name="settings_effect_mode_mosaic">Mosaic</string>
 
     <string name="notification_new_wallpaper">New wallpaper</string>
     <string name="notification_new_wallpaper_channel_name">New wallpapers</string>
