@@ -35,6 +35,7 @@ import com.google.android.apps.muzei.util.TickingFloatAnimator
 import com.google.android.apps.muzei.util.constrain
 import com.google.android.apps.muzei.util.floorEven
 import com.google.android.apps.muzei.util.interpolate
+import com.google.android.apps.muzei.util.MosaicShape
 import com.google.android.apps.muzei.util.mosaicBitmap
 import com.google.android.apps.muzei.util.roundMult4
 import com.google.android.apps.muzei.util.uninterpolate
@@ -75,6 +76,7 @@ class MuzeiBlurRenderer(
         const val DEFAULT_MAX_DIM = 128 // technical max 255
         const val DEFAULT_MOSAIC = 100 // max 500
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
+        const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
         private const val DEMO_BLUR = 250
         private const val DEMO_DIM = 64
         private const val DEMO_GREY = 0
@@ -92,6 +94,7 @@ class MuzeiBlurRenderer(
     private var maxGrey: Int = 0
     private var mosaicAmount: Int = DEFAULT_MOSAIC
     private var currentEffectMode: String = DEFAULT_EFFECT_MODE
+    private var currentMosaicShape: MosaicShape = MosaicShape.SQUARE
 
     // Model and view matrices. Projection and MVP stored in picture set
     private val modelMatrix = FloatArray(16)
@@ -121,6 +124,7 @@ class MuzeiBlurRenderer(
     private var greyPreferenceName = Prefs.PREF_GREY_AMOUNT
     private var mosaicPreferenceName = Prefs.PREF_MOSAIC_AMOUNT
     private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
+    private var mosaicShapePreferenceName = Prefs.PREF_MOSAIC_SHAPE
     private var blurRelatedToArtDetailMode = false
     private val blurInterpolator = AccelerateDecelerateInterpolator()
     private val blurAnimator = TickingFloatAnimator(BLUR_ANIMATION_DURATION * if (demoMode) 5 else 1)
@@ -140,6 +144,7 @@ class MuzeiBlurRenderer(
         recomputeGreyAmount()
         recomputeMosaicAmount()
         recomputeEffectMode()
+        recomputeMosaicShape()
     }
 
     fun recomputeMaxPrescaledBlurPixels(
@@ -197,6 +202,20 @@ class MuzeiBlurRenderer(
         currentEffectMode = Prefs.getSharedPreferences(context)
                 .getString(effectModePreferenceName, DEFAULT_EFFECT_MODE)
                 ?: DEFAULT_EFFECT_MODE
+    }
+
+    fun recomputeMosaicShape(
+            newMosaicShapePreferenceName: String = mosaicShapePreferenceName
+    ) {
+        mosaicShapePreferenceName = newMosaicShapePreferenceName
+        val raw = Prefs.getSharedPreferences(context)
+                .getString(mosaicShapePreferenceName, DEFAULT_MOSAIC_SHAPE)
+                ?: DEFAULT_MOSAIC_SHAPE
+        currentMosaicShape = when (raw) {
+            Prefs.MOSAIC_SHAPE_TRIANGLE -> MosaicShape.TRIANGLE
+            Prefs.MOSAIC_SHAPE_HEXAGON -> MosaicShape.HEXAGON
+            else -> MosaicShape.SQUARE
+        }
     }
 
     private fun mosaicTilePixelsAtFrame(scaledHeight: Int, f: Int): Int {
@@ -600,7 +619,7 @@ class MuzeiBlurRenderer(
         ) {
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f)
-                val pixelated = mosaicBitmap(scaledBitmap, tilePx)
+                val pixelated = mosaicBitmap(scaledBitmap, tilePx, currentMosaicShape)
                 val desaturateAmount = maxGrey / 500f * f / blurKeyframes
                 val finalBitmap = if (desaturateAmount > 0f && pixelated != null) {
                     val blurrer = ImageBlurrer(context, pixelated)

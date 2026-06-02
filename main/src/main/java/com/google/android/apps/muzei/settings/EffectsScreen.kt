@@ -63,6 +63,7 @@ fun EffectsScreen(
     greyPref: String,
     effectModePref: String,
     mosaicPref: String,
+    mosaicShapePref: String,
     modifier: Modifier = Modifier,
 ) {
     val blur =
@@ -76,6 +77,9 @@ fun EffectsScreen(
     val effectMode = rememberPreferenceSourcedStringValue(
         prefs, effectModePref, MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
     )
+    val mosaicShape = rememberPreferenceSourcedStringValue(
+        prefs, mosaicShapePref, MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
+    )
     EffectsScreen(
         effectMode = effectMode.value,
         onEffectModeChange = { effectMode.value = it },
@@ -85,6 +89,8 @@ fun EffectsScreen(
         mosaic = mosaic.value,
         onMosaicChange = { mosaic.value = it },
         onMosaicChangeFinished = { mosaic.userControlled = false },
+        mosaicShape = mosaicShape.value,
+        onMosaicShapeChange = { mosaicShape.value = it },
         dim = dim.value,
         onDimChange = { dim.value = it },
         onDimChangeFinished = { dim.userControlled = false },
@@ -105,6 +111,8 @@ fun EffectsScreen(
     mosaic: Int,
     onMosaicChange: (Int) -> Unit,
     onMosaicChangeFinished: (() -> Unit),
+    mosaicShape: String,
+    onMosaicShapeChange: (String) -> Unit,
     dim: Int,
     onDimChange: (Int) -> Unit,
     onDimChangeFinished: (() -> Unit),
@@ -122,6 +130,7 @@ fun EffectsScreen(
     } else {
         Modifier.wrapContentHeight().padding(horizontal = 32.dp)
     }
+    val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -149,6 +158,15 @@ fun EffectsScreen(
             onGreyChange = onGreyChange,
             onGreyChangeFinished = onGreyChangeFinished,
         )
+        if (isMosaic) {
+            MosaicShapeSelector(
+                shape = mosaicShape,
+                onShapeChange = onMosaicShapeChange,
+                modifier = contentModifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            )
+        }
     }
 }
 
@@ -168,6 +186,37 @@ private fun EffectModeSelector(
             SegmentedButton(
                 selected = mode == value,
                 onClick = { onModeChange(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = Color.White.copy(alpha = 0.18f),
+                    activeContentColor = Color.White,
+                    inactiveContainerColor = Color.Transparent,
+                    inactiveContentColor = Color.White,
+                ),
+            ) {
+                Text(text = stringResource(label))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MosaicShapeSelector(
+    shape: String,
+    onShapeChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        Prefs.MOSAIC_SHAPE_SQUARE to R.string.settings_mosaic_shape_square,
+        Prefs.MOSAIC_SHAPE_TRIANGLE to R.string.settings_mosaic_shape_triangle,
+        Prefs.MOSAIC_SHAPE_HEXAGON to R.string.settings_mosaic_shape_hexagon,
+    )
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = shape == value,
+                onClick = { onShapeChange(value) },
                 shape = SegmentedButtonDefaults.itemShape(index, options.size),
                 colors = SegmentedButtonDefaults.colors(
                     activeContainerColor = Color.White.copy(alpha = 0.18f),
@@ -321,6 +370,7 @@ fun EffectsScreenPreview() {
         var effectMode by remember { mutableStateOf(MuzeiBlurRenderer.DEFAULT_EFFECT_MODE) }
         var blur by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_BLUR) }
         var mosaic by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC) }
+        var mosaicShape by remember { mutableStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE) }
         var dim by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_MAX_DIM) }
         var grey by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_GREY) }
         EffectsScreen(
@@ -332,6 +382,8 @@ fun EffectsScreenPreview() {
             mosaic = mosaic,
             onMosaicChange = { mosaic = it },
             onMosaicChangeFinished = {},
+            mosaicShape = mosaicShape,
+            onMosaicShapeChange = { mosaicShape = it },
             dim = dim,
             onDimChange = { dim = it },
             onDimChangeFinished = {},

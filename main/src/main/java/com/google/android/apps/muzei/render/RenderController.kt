@@ -67,6 +67,8 @@ abstract class RenderController(
                         if (value) Prefs.PREF_LOCK_MOSAIC_AMOUNT else Prefs.PREF_MOSAIC_AMOUNT)
                 renderer.recomputeEffectMode(
                         if (value) Prefs.PREF_LOCK_EFFECT_MODE else Prefs.PREF_EFFECT_MODE)
+                renderer.recomputeMosaicShape(
+                        if (value) Prefs.PREF_LOCK_MOSAIC_SHAPE else Prefs.PREF_MOSAIC_SHAPE)
                 // Switch immediately if we're transitioning to the lock screen
                 reloadCurrentArtwork(if (value) ReloadImmediate else ReloadDespiteInvisible)
             }
@@ -97,6 +99,10 @@ abstract class RenderController(
                     renderer.recomputeEffectMode()
                     throttledForceReloadCurrentArtwork()
                 }
+                Prefs.PREF_LOCK_MOSAIC_SHAPE -> {
+                    renderer.recomputeMosaicShape()
+                    throttledForceReloadCurrentArtwork()
+                }
             }
         } else {
             when (key) {
@@ -118,6 +124,10 @@ abstract class RenderController(
                 }
                 Prefs.PREF_EFFECT_MODE -> {
                     renderer.recomputeEffectMode()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_MOSAIC_SHAPE -> {
+                    renderer.recomputeMosaicShape()
                     throttledForceReloadCurrentArtwork()
                 }
             }

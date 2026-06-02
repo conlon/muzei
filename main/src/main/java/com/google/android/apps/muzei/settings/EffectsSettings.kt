@@ -142,6 +142,8 @@ fun EffectsSettings(
                 else Prefs.PREF_LOCK_EFFECT_MODE
             val mosaicPref = if (page == 0) Prefs.PREF_MOSAIC_AMOUNT
                 else Prefs.PREF_LOCK_MOSAIC_AMOUNT
+            val mosaicShapePref = if (page == 0) Prefs.PREF_MOSAIC_SHAPE
+                else Prefs.PREF_LOCK_MOSAIC_SHAPE
             EffectsScreen(
                 prefs = prefs,
                 blurPref = blurPref,
@@ -149,6 +151,7 @@ fun EffectsSettings(
                 greyPref = greyPref,
                 effectModePref = effectModePref,
                 mosaicPref = mosaicPref,
+                mosaicShapePref = mosaicShapePref,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -307,6 +310,32 @@ private fun EffectsSettingsActions(
                     }
                 }
             }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_MOSAIC_SHAPE,
+                    MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getString(prefName, defaultValue) ?: defaultValue
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putString(Prefs.PREF_LOCK_MOSAIC_SHAPE, newValue)
+                    }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_MOSAIC_SHAPE,
+                    MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getString(prefName, defaultValue) ?: defaultValue
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putString(Prefs.PREF_MOSAIC_SHAPE, newValue)
+                    }
+                }
+            }
         }
     }
 
@@ -359,6 +388,13 @@ private fun EffectsSettingsActions(
                             MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
                         )
                     )
+                    putString(
+                        Prefs.PREF_LOCK_MOSAIC_SHAPE,
+                        prefs.getString(
+                            Prefs.PREF_MOSAIC_SHAPE,
+                            MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
+                        )
+                    )
                 }
             } else {
                 // Update the home screen effects to match the lock screen
@@ -396,6 +432,13 @@ private fun EffectsSettingsActions(
                         prefs.getString(
                             Prefs.PREF_LOCK_EFFECT_MODE,
                             MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
+                        )
+                    )
+                    putString(
+                        Prefs.PREF_MOSAIC_SHAPE,
+                        prefs.getString(
+                            Prefs.PREF_LOCK_MOSAIC_SHAPE,
+                            MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
                         )
                     )
                 }
@@ -480,6 +523,14 @@ private fun EffectsSettingsActions(
                     putString(
                         Prefs.PREF_LOCK_EFFECT_MODE,
                         MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
+                    )
+                    putString(
+                        Prefs.PREF_MOSAIC_SHAPE,
+                        MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
+                    )
+                    putString(
+                        Prefs.PREF_LOCK_MOSAIC_SHAPE,
+                        MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
                     )
                 }
             }
