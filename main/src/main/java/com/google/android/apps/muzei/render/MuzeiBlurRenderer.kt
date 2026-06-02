@@ -35,6 +35,8 @@ import com.google.android.apps.muzei.util.TickingFloatAnimator
 import com.google.android.apps.muzei.util.constrain
 import com.google.android.apps.muzei.util.floorEven
 import com.google.android.apps.muzei.util.interpolate
+import com.google.android.apps.muzei.util.MosaicShape
+import com.google.android.apps.muzei.util.mosaicBitmap
 import com.google.android.apps.muzei.util.roundMult4
 import com.google.android.apps.muzei.util.uninterpolate
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,10 +74,17 @@ class MuzeiBlurRenderer(
         const val DEFAULT_BLUR = 250 // max 500
         const val DEFAULT_GREY = 0 // max 500
         const val DEFAULT_MAX_DIM = 128 // technical max 255
+        const val DEFAULT_MOSAIC = 100 // max 500
+        const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
+        const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
         private const val DEMO_BLUR = 250
         private const val DEMO_DIM = 64
         private const val DEMO_GREY = 0
         private const val DIM_RANGE = 0.5f // percent of max dim
+        // At max amount, mosaic tile size = this fraction of source bitmap height.
+        // ~0.20 => ~5 tiles vertically at max, which reads as obviously mosaic'd
+        // without becoming unrecognisable.
+        private const val MOSAIC_MAX_TILE_FRACTION = 0.20f
     }
 
     private val blurKeyframes: Int
@@ -83,6 +92,9 @@ class MuzeiBlurRenderer(
     private var blurredSampleSize: Int = 0
     private var maxDim: Int = 0
     private var maxGrey: Int = 0
+    private var mosaicAmount: Int = DEFAULT_MOSAIC
+    private var currentEffectMode: String = DEFAULT_EFFECT_MODE
+    private var currentMosaicShape: MosaicShape = MosaicShape.SQUARE
 
     // Model and view matrices. Projection and MVP stored in picture set
     private val modelMatrix = FloatArray(16)
@@ -113,6 +125,9 @@ class MuzeiBlurRenderer(
     private var blurPreferenceName = Prefs.PREF_BLUR_AMOUNT
     private var dimPreferenceName = Prefs.PREF_DIM_AMOUNT
     private var greyPreferenceName = Prefs.PREF_GREY_AMOUNT
+    private var mosaicPreferenceName = Prefs.PREF_MOSAIC_AMOUNT
+    private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
+    private var mosaicShapePreferenceName = Prefs.PREF_MOSAIC_SHAPE
     private var blurRelatedToArtDetailMode = false
     private val blurInterpolator = AccelerateDecelerateInterpolator()
     private val blurAnimator = TickingFloatAnimator(BLUR_ANIMATION_DURATION * if (demoMode) 5 else 1)
@@ -130,6 +145,9 @@ class MuzeiBlurRenderer(
         recomputeMaxPrescaledBlurPixels()
         recomputeMaxDimAmount()
         recomputeGreyAmount()
+        recomputeMosaicAmount()
+        recomputeEffectMode()
+        recomputeMosaicShape()
     }
 
     fun recomputeMaxPrescaledBlurPixels(
@@ -169,6 +187,46 @@ class MuzeiBlurRenderer(
         else
             Prefs.getSharedPreferences(context)
                     .getInt(greyPreferenceName, DEFAULT_GREY)
+    }
+
+    fun recomputeMosaicAmount(
+            newMosaicPreferenceName: String = mosaicPreferenceName
+    ) {
+        mosaicPreferenceName = newMosaicPreferenceName
+        mosaicAmount = Prefs.getSharedPreferences(context)
+                .getInt(mosaicPreferenceName, DEFAULT_MOSAIC)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeEffectMode(
+            newEffectModePreferenceName: String = effectModePreferenceName
+    ) {
+        effectModePreferenceName = newEffectModePreferenceName
+        currentEffectMode = Prefs.getSharedPreferences(context)
+                .getString(effectModePreferenceName, DEFAULT_EFFECT_MODE)
+                ?: DEFAULT_EFFECT_MODE
+    }
+
+    fun recomputeMosaicShape(
+            newMosaicShapePreferenceName: String = mosaicShapePreferenceName
+    ) {
+        mosaicShapePreferenceName = newMosaicShapePreferenceName
+        val raw = Prefs.getSharedPreferences(context)
+                .getString(mosaicShapePreferenceName, DEFAULT_MOSAIC_SHAPE)
+                ?: DEFAULT_MOSAIC_SHAPE
+        currentMosaicShape = when (raw) {
+            Prefs.MOSAIC_SHAPE_TRIANGLE -> MosaicShape.TRIANGLE
+            Prefs.MOSAIC_SHAPE_HEXAGON -> MosaicShape.HEXAGON
+            else -> MosaicShape.SQUARE
+        }
+    }
+
+    private fun mosaicTilePixelsAtFrame(scaledHeight: Int, f: Int): Int {
+        if (mosaicAmount <= 0) return 1
+        val frameFraction = f.toFloat() / blurKeyframes
+        val amountFraction = mosaicAmount / 500f
+        val tile = amountFraction * MOSAIC_MAX_TILE_FRACTION * scaledHeight * frameFraction
+        return max(1, tile.toInt())
     }
 
     override fun onSurfaceCreated(unused: GL10, config: EGLConfig) {
@@ -373,12 +431,16 @@ class MuzeiBlurRenderer(
                                 "was too large, trying a sample size of $sampleSize")
                     }
                 } while (!success)
-                if (maxPrescaledBlurPixels == 0 && maxGrey == 0) {
+                val mosaicActive = currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&
+                        mosaicAmount > 0
+                val blurActive = currentEffectMode == Prefs.EFFECT_MODE_BLUR &&
+                        maxPrescaledBlurPixels > 0
+                if (!mosaicActive && !blurActive && maxGrey == 0) {
                     for (f in 1..blurKeyframes) {
                         pictures[f] = pictures[0]
                     }
                 } else {
-                    val sampleSizeTargetHeight: Int = if (maxPrescaledBlurPixels > 0) {
+                    val sampleSizeTargetHeight: Int = if (blurActive) {
                         currentHeight / blurredSampleSize
                     } else {
                         currentHeight
@@ -388,17 +450,12 @@ class MuzeiBlurRenderer(
                     val scaledHeight = max(2, sampleSizeTargetHeight.floorEven())
                     val scaledWidth = max(4, (scaledHeight * bitmapAspectRatio).toInt().roundMult4())
 
-                    // To blur, first load the entire bitmap region, but at a very large
-                    // sample size that's appropriate for the final blurred image
+                    // Load the entire bitmap region at a sample size appropriate for the
+                    // final effect (blurred or mosaic'd) image.
                     tempBitmap = imageLoader.decode(scaledWidth, scaledHeight)
 
                     if (tempBitmap != null
                             && tempBitmap.width != 0 && tempBitmap.height != 0) {
-                        // Next, create a scaled down version of the bitmap so that the blur radius
-                        // looks appropriate (tempBitmap will likely be bigger than the final
-                        // blurred bitmap, and thus the blur may look smaller if we just used
-                        // tempBitmap as the final blurred bitmap).
-
                         // Note that image width should be a multiple of 4 to avoid
                         // issues with RenderScript allocations.
                         val scaledBitmap = tempBitmap.scale(scaledWidth, scaledHeight)
@@ -406,20 +463,11 @@ class MuzeiBlurRenderer(
                             tempBitmap.recycle()
                         }
 
-                        // And finally, create a blurred copy for each keyframe.
-                        val blurrer = ImageBlurrer(context, scaledBitmap)
-                        for (f in 1..blurKeyframes) {
-                            val desaturateAmount = maxGrey / 500f * f / blurKeyframes
-                            val blurRadius = if (maxPrescaledBlurPixels > 0) {
-                                blurRadiusAtFrame(f.toFloat())
-                            } else {
-                                0f
-                            }
-                            val blurredBitmap = blurrer.blurBitmap(blurRadius, desaturateAmount)
-                            pictures[f] = blurredBitmap?.toGLPicture()
-                            blurredBitmap?.recycle()
+                        if (mosaicActive) {
+                            generateMosaicKeyframes(scaledBitmap, scaledHeight)
+                        } else {
+                            generateBlurKeyframes(scaledBitmap)
                         }
-                        blurrer.destroy()
 
                         scaledBitmap.recycle()
                     } else {
@@ -571,6 +619,44 @@ class MuzeiBlurRenderer(
                     pictures[lo]?.draw(mvpMatrix, newLocalLoAlpha)
                     pictures[hi]?.draw(mvpMatrix, newLocalHiAlpha)
                 }
+            }
+        }
+
+        private fun generateBlurKeyframes(scaledBitmap: android.graphics.Bitmap) {
+            val blurrer = ImageBlurrer(context, scaledBitmap)
+            for (f in 1..blurKeyframes) {
+                val desaturateAmount = maxGrey / 500f * f / blurKeyframes
+                val blurRadius = if (maxPrescaledBlurPixels > 0) {
+                    blurRadiusAtFrame(f.toFloat())
+                } else {
+                    0f
+                }
+                val blurredBitmap = blurrer.blurBitmap(blurRadius, desaturateAmount)
+                pictures[f] = blurredBitmap?.toGLPicture()
+                blurredBitmap?.recycle()
+            }
+            blurrer.destroy()
+        }
+
+        private fun generateMosaicKeyframes(
+            scaledBitmap: android.graphics.Bitmap,
+            scaledHeight: Int,
+        ) {
+            for (f in 1..blurKeyframes) {
+                val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f)
+                val pixelated = mosaicBitmap(scaledBitmap, tilePx, currentMosaicShape)
+                val desaturateAmount = maxGrey / 500f * f / blurKeyframes
+                val finalBitmap = if (desaturateAmount > 0f && pixelated != null) {
+                    val blurrer = ImageBlurrer(context, pixelated)
+                    val out = blurrer.blurBitmap(0f, desaturateAmount)
+                    blurrer.destroy()
+                    pixelated.recycle()
+                    out
+                } else {
+                    pixelated
+                }
+                pictures[f] = finalBitmap?.toGLPicture()
+                finalBitmap?.recycle()
             }
         }
 

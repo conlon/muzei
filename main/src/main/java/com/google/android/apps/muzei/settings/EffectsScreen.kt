@@ -17,6 +17,7 @@
 package com.google.android.apps.muzei.settings
 
 import android.content.SharedPreferences
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,13 +27,18 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,6 +64,9 @@ fun EffectsScreen(
     blurPref: String,
     dimPref: String,
     greyPref: String,
+    effectModePref: String,
+    mosaicPref: String,
+    mosaicShapePref: String,
     parallaxPref: String? = null,
     showAutoFraming: Boolean = false,
     showFavoriteBoost: Boolean = false,
@@ -69,6 +78,14 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, dimPref, MuzeiBlurRenderer.DEFAULT_MAX_DIM)
     val grey =
         rememberPreferenceSourcedValue(prefs, greyPref, MuzeiBlurRenderer.DEFAULT_GREY)
+    val mosaic =
+        rememberPreferenceSourcedValue(prefs, mosaicPref, MuzeiBlurRenderer.DEFAULT_MOSAIC)
+    val effectMode = rememberPreferenceSourcedStringValue(
+        prefs, effectModePref, MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
+    )
+    val mosaicShape = rememberPreferenceSourcedStringValue(
+        prefs, mosaicShapePref, MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
+    )
     val parallax = parallaxPref?.let {
         rememberPreferenceSourcedValue(prefs, it, Prefs.DEFAULT_PARALLAX)
     }
@@ -79,9 +96,16 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, Prefs.PREF_FAVORITE_BOOST, Prefs.DEFAULT_FAVORITE_BOOST)
     } else null
     EffectsScreen(
+        effectMode = effectMode.value,
+        onEffectModeChange = { effectMode.value = it },
         blur = blur.value,
         onBlurChange = { blur.value = it },
         onBlurChangeFinished = { blur.userControlled = false },
+        mosaic = mosaic.value,
+        onMosaicChange = { mosaic.value = it },
+        onMosaicChangeFinished = { mosaic.userControlled = false },
+        mosaicShape = mosaicShape.value,
+        onMosaicShapeChange = { mosaicShape.value = it },
         dim = dim.value,
         onDimChange = { dim.value = it },
         onDimChangeFinished = { dim.userControlled = false },
@@ -102,9 +126,16 @@ fun EffectsScreen(
 
 @Composable
 fun EffectsScreen(
+    effectMode: String,
+    onEffectModeChange: (String) -> Unit,
     blur: Int,
     onBlurChange: (Int) -> Unit,
     onBlurChangeFinished: (() -> Unit),
+    mosaic: Int,
+    onMosaicChange: (Int) -> Unit,
+    onMosaicChangeFinished: (() -> Unit),
+    mosaicShape: String,
+    onMosaicShapeChange: (String) -> Unit,
     dim: Int,
     onDimChange: (Int) -> Unit,
     onDimChangeFinished: (() -> Unit),
@@ -125,36 +156,57 @@ fun EffectsScreen(
         val pixelSize = LocalWindowInfo.current.containerSize
         DpSize(pixelSize.width.toDp(), pixelSize.height.toDp())
     }
-    val gridModifier = if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
+    val contentModifier = if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
         Modifier.wrapContentSize().sizeIn(maxWidth = 500.dp)
     } else {
         Modifier.wrapContentHeight().padding(horizontal = 32.dp)
     }
+    val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
     val showAutoFraming = autoFramingEnabled != null && onAutoFramingChange != null
-    val hasExtras = showAutoFraming
-    if (!hasExtras) {
-        EffectsGrid(
-            modifier = modifier.then(gridModifier),
-            blur = blur, onBlurChange = onBlurChange, onBlurChangeFinished = onBlurChangeFinished,
-            dim = dim, onDimChange = onDimChange, onDimChangeFinished = onDimChangeFinished,
-            grey = grey, onGreyChange = onGreyChange, onGreyChangeFinished = onGreyChangeFinished,
-            parallax = parallax, onParallaxChange = onParallaxChange, onParallaxChangeFinished = onParallaxChangeFinished,
-            favoriteBoost = favoriteBoost, onFavoriteBoostChange = onFavoriteBoostChange, onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
+    Column(
+        modifier = modifier,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        EffectModeSelector(
+            mode = effectMode,
+            onModeChange = onEffectModeChange,
+            modifier = contentModifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
         )
-    } else {
-        androidx.compose.foundation.layout.Column(
-            modifier = modifier,
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            EffectsGrid(
-                modifier = gridModifier,
-                blur = blur, onBlurChange = onBlurChange, onBlurChangeFinished = onBlurChangeFinished,
-                dim = dim, onDimChange = onDimChange, onDimChangeFinished = onDimChangeFinished,
-                grey = grey, onGreyChange = onGreyChange, onGreyChangeFinished = onGreyChangeFinished,
-                parallax = parallax, onParallaxChange = onParallaxChange, onParallaxChangeFinished = onParallaxChangeFinished,
-                favoriteBoost = favoriteBoost, onFavoriteBoostChange = onFavoriteBoostChange, onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
+        EffectsGrid(
+            modifier = contentModifier,
+            effectMode = effectMode,
+            blur = blur,
+            onBlurChange = onBlurChange,
+            onBlurChangeFinished = onBlurChangeFinished,
+            mosaic = mosaic,
+            onMosaicChange = onMosaicChange,
+            onMosaicChangeFinished = onMosaicChangeFinished,
+            dim = dim,
+            onDimChange = onDimChange,
+            onDimChangeFinished = onDimChangeFinished,
+            grey = grey,
+            onGreyChange = onGreyChange,
+            onGreyChangeFinished = onGreyChangeFinished,
+            parallax = parallax,
+            onParallaxChange = onParallaxChange,
+            onParallaxChangeFinished = onParallaxChangeFinished,
+            favoriteBoost = favoriteBoost,
+            onFavoriteBoostChange = onFavoriteBoostChange,
+            onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
+        )
+        if (isMosaic) {
+            MosaicShapeSelector(
+                shape = mosaicShape,
+                onShapeChange = onMosaicShapeChange,
+                modifier = contentModifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
             )
+        }
+        if (showAutoFraming) {
             Row(
                 modifier = (if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
                     Modifier.sizeIn(maxWidth = 500.dp)
@@ -183,12 +235,77 @@ fun EffectsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EffectModeSelector(
+    mode: String,
+    onModeChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        Prefs.EFFECT_MODE_BLUR to R.string.settings_effect_mode_blur,
+        Prefs.EFFECT_MODE_MOSAIC to R.string.settings_effect_mode_mosaic,
+    )
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = mode == value,
+                onClick = { onModeChange(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = Color.White.copy(alpha = 0.18f),
+                    activeContentColor = Color.White,
+                    inactiveContainerColor = Color.Transparent,
+                    inactiveContentColor = Color.White,
+                ),
+            ) {
+                Text(text = stringResource(label))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MosaicShapeSelector(
+    shape: String,
+    onShapeChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        Prefs.MOSAIC_SHAPE_SQUARE to R.string.settings_mosaic_shape_square,
+        Prefs.MOSAIC_SHAPE_TRIANGLE to R.string.settings_mosaic_shape_triangle,
+        Prefs.MOSAIC_SHAPE_HEXAGON to R.string.settings_mosaic_shape_hexagon,
+    )
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = shape == value,
+                onClick = { onShapeChange(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = Color.White.copy(alpha = 0.18f),
+                    activeContentColor = Color.White,
+                    inactiveContainerColor = Color.Transparent,
+                    inactiveContentColor = Color.White,
+                ),
+            ) {
+                Text(text = stringResource(label))
+            }
+        }
+    }
+}
+
 @Composable
 private fun EffectsGrid(
     modifier: Modifier = Modifier,
+    effectMode: String = MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
     blur: Int = MuzeiBlurRenderer.DEFAULT_BLUR,
     onBlurChange: (Int) -> Unit = {},
     onBlurChangeFinished: (() -> Unit) = {},
+    mosaic: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC,
+    onMosaicChange: (Int) -> Unit = {},
+    onMosaicChangeFinished: (() -> Unit) = {},
     dim: Int = MuzeiBlurRenderer.DEFAULT_MAX_DIM,
     onDimChange: (Int) -> Unit = {},
     onDimChangeFinished: (() -> Unit) = {},
@@ -202,6 +319,12 @@ private fun EffectsGrid(
     onFavoriteBoostChange: ((Int) -> Unit)? = null,
     onFavoriteBoostChangeFinished: (() -> Unit)? = null,
 ) {
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = Color.White,
+        activeTrackColor = Color.White,
+        inactiveTrackColor = Color.DarkGray,
+    )
+    val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
     val showParallax = parallax != null && onParallaxChange != null
     val showFavoriteBoost = favoriteBoost != null && onFavoriteBoostChange != null
     val rowCount = 3 + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
@@ -209,7 +332,10 @@ private fun EffectsGrid(
         content = {
             // Titles
             Text(
-                text = stringResource(R.string.settings_blur_amount_title),
+                text = stringResource(
+                    if (isMosaic) R.string.settings_mosaic_amount_title
+                    else R.string.settings_blur_amount_title
+                ),
                 modifier = Modifier.padding(vertical = 8.dp),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
@@ -243,29 +369,32 @@ private fun EffectsGrid(
                 )
             }
             // Sliders
-            Slider(
-                value = blur.toFloat(),
-                onValueChange = { onBlurChange(it.toInt()) },
-                modifier = Modifier.padding(vertical = 8.dp),
-                valueRange = 0f..500f,
-                onValueChangeFinished = onBlurChangeFinished,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.DarkGray,
+            if (isMosaic) {
+                Slider(
+                    value = mosaic.toFloat(),
+                    onValueChange = { onMosaicChange(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..500f,
+                    onValueChangeFinished = onMosaicChangeFinished,
+                    colors = sliderColors,
                 )
-            )
+            } else {
+                Slider(
+                    value = blur.toFloat(),
+                    onValueChange = { onBlurChange(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..500f,
+                    onValueChangeFinished = onBlurChangeFinished,
+                    colors = sliderColors,
+                )
+            }
             Slider(
                 value = dim.toFloat(),
                 onValueChange = { onDimChange(it.toInt()) },
                 modifier = Modifier.padding(vertical = 8.dp),
                 valueRange = 0f..255f,
                 onValueChangeFinished = onDimChangeFinished,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.DarkGray,
-                )
+                colors = sliderColors,
             )
             Slider(
                 value = grey.toFloat(),
@@ -273,11 +402,7 @@ private fun EffectsGrid(
                 modifier = Modifier.padding(vertical = 8.dp),
                 valueRange = 0f..500f,
                 onValueChangeFinished = onGreyChangeFinished,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.DarkGray,
-                )
+                colors = sliderColors,
             )
             if (showParallax) {
                 Slider(
@@ -360,13 +485,23 @@ fun EffectsScreenPreview() {
     AppTheme(
         dynamicColor = false
     ) {
+        var effectMode by remember { mutableStateOf(MuzeiBlurRenderer.DEFAULT_EFFECT_MODE) }
         var blur by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_BLUR) }
+        var mosaic by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC) }
+        var mosaicShape by remember { mutableStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE) }
         var dim by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_MAX_DIM) }
         var grey by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_GREY) }
         EffectsScreen(
+            effectMode = effectMode,
+            onEffectModeChange = { effectMode = it },
             blur = blur,
             onBlurChange = { blur = it },
             onBlurChangeFinished = {},
+            mosaic = mosaic,
+            onMosaicChange = { mosaic = it },
+            onMosaicChangeFinished = {},
+            mosaicShape = mosaicShape,
+            onMosaicShapeChange = { mosaicShape = it },
             dim = dim,
             onDimChange = { dim = it },
             onDimChangeFinished = {},

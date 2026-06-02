@@ -49,6 +49,17 @@ object Prefs {
     const val DEFAULT_AUTO_FRAMING = true
     const val PREF_FAVORITE_BOOST = "favorite_boost"
     const val DEFAULT_FAVORITE_BOOST = 0
+    const val PREF_EFFECT_MODE = "effect_mode"
+    const val PREF_LOCK_EFFECT_MODE = "lock_effect_mode"
+    const val PREF_MOSAIC_AMOUNT = "mosaic_amount"
+    const val PREF_LOCK_MOSAIC_AMOUNT = "lock_mosaic_amount"
+    const val PREF_MOSAIC_SHAPE = "mosaic_shape"
+    const val PREF_LOCK_MOSAIC_SHAPE = "lock_mosaic_shape"
+    const val EFFECT_MODE_BLUR = "blur"
+    const val EFFECT_MODE_MOSAIC = "mosaic"
+    const val MOSAIC_SHAPE_SQUARE = "square"
+    const val MOSAIC_SHAPE_TRIANGLE = "triangle"
+    const val MOSAIC_SHAPE_HEXAGON = "hexagon"
     const val PREF_LINK_EFFECTS = "link_effects"
     private const val PREF_DISABLE_BLUR_WHEN_LOCKED = "disable_blur_when_screen_locked_enabled"
 
