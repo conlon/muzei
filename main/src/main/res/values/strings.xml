@@ -27,11 +27,17 @@
     <string name="settings_auto_framing_title">Auto-frame subjects</string>
     <string name="settings_favorite_boost_title">Favorites</string>
     <string name="settings_mosaic_amount_title">Tile size</string>
+    <string name="settings_mosaic_opacity_title">Effect strength</string>
     <string name="settings_effect_mode_blur">Blur</string>
     <string name="settings_effect_mode_mosaic">Mosaic</string>
     <string name="settings_mosaic_shape_square">Square</string>
     <string name="settings_mosaic_shape_triangle">Triangle</string>
     <string name="settings_mosaic_shape_hexagon">Hexagon</string>
+    <string name="settings_mosaic_shape_random">Random</string>
+    <string name="settings_mosaic_shape_mixed1">Mixed 1</string>
+    <string name="settings_mosaic_shape_mixed2">Mixed 2</string>
+    <string name="settings_mosaic_shape_mixed3">Mixed 3</string>
+    <string name="settings_mosaic_shape_mixed4">Mixed 4</string>
 
     <string name="action_favorite">Favorite</string>
     <string name="action_unfavorite">Unfavorite</string>

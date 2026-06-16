@@ -50,6 +50,7 @@ fun InputStream.isValidImage(): Boolean {
  * Base class for loading images with the correct rotation
  */
 sealed class ImageLoader {
+    open val seed: Long = 0L
 
     companion object {
         private const val TAG = "ImageLoader"
@@ -163,7 +164,8 @@ sealed class ImageLoader {
  */
 class ContentUriImageLoader(
         private val contentResolver: ContentResolver,
-        private val uri: Uri
+        private val uri: Uri,
+        override val seed: Long = 0L,
 ) : ImageLoader() {
 
     @Throws(FileNotFoundException::class)

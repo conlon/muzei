@@ -65,6 +65,8 @@ abstract class RenderController(
                         if (value) Prefs.PREF_LOCK_GREY_AMOUNT else Prefs.PREF_GREY_AMOUNT)
                 renderer.recomputeMosaicAmount(
                         if (value) Prefs.PREF_LOCK_MOSAIC_AMOUNT else Prefs.PREF_MOSAIC_AMOUNT)
+                renderer.recomputeMosaicOpacity(
+                        if (value) Prefs.PREF_LOCK_MOSAIC_OPACITY else Prefs.PREF_MOSAIC_OPACITY)
                 renderer.recomputeEffectMode(
                         if (value) Prefs.PREF_LOCK_EFFECT_MODE else Prefs.PREF_EFFECT_MODE)
                 renderer.recomputeMosaicShape(
@@ -95,6 +97,10 @@ abstract class RenderController(
                     renderer.recomputeMosaicAmount()
                     throttledForceReloadCurrentArtwork()
                 }
+                Prefs.PREF_LOCK_MOSAIC_OPACITY -> {
+                    renderer.recomputeMosaicOpacity()
+                    throttledForceReloadCurrentArtwork()
+                }
                 Prefs.PREF_LOCK_EFFECT_MODE -> {
                     renderer.recomputeEffectMode()
                     throttledForceReloadCurrentArtwork()
@@ -120,6 +126,10 @@ abstract class RenderController(
                 }
                 Prefs.PREF_MOSAIC_AMOUNT -> {
                     renderer.recomputeMosaicAmount()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_MOSAIC_OPACITY -> {
+                    renderer.recomputeMosaicOpacity()
                     throttledForceReloadCurrentArtwork()
                 }
                 Prefs.PREF_EFFECT_MODE -> {
