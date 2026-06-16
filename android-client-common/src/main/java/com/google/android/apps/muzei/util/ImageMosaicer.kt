@@ -103,89 +103,27 @@ private fun newCanvasBitmap(source: Bitmap): Pair<Bitmap, Canvas> {
     return out to Canvas(out)
 }
 
-/**
- * Partitions [source] into segments by assigning each pixel a Long id via [segmentIdOf],
- * then samples one base-image colour per segment at the segment's centroid. Uses a
- * primitive open-addressing Long→Int map (zero boxing) so this is fast even at full
- * screen resolution.
- */
-private fun segmentSampledBitmap(source: Bitmap, segmentIdOf: (x: Int, y: Int) -> Long): Bitmap {
-    val w = source.width
-    val h = source.height
-    val pixelCount = w * h
-    // Long.MIN_VALUE is the empty-slot sentinel; callers must not produce this key.
-    val EMPTY = Long.MIN_VALUE
+// ---------------------------------------------------------------------------
+// Avalanche hash helpers — used by all Mixed variants.
+// Replaces the old linear `col*A + row*B` hash (whose low bits are not random
+// and produce visible checkerboard / lattice artifacts).
+// ---------------------------------------------------------------------------
 
-    // Primitive open-addressing Long→Int map; load factor kept ≤ 0.5.
-    var cap = 64
-    var hashKeys = LongArray(cap) { EMPTY }
-    var hashVals = IntArray(cap)
-    var mapSize = 0
-
-    // Per-slot centroid accumulators (grown alongside the map).
-    var aLen = 32
-    var sumX = LongArray(aLen)
-    var sumY = LongArray(aLen)
-    var cnt  = IntArray(aLen)
-    var slotCount = 0
-
-    fun growAccumulators() { aLen *= 2; sumX = sumX.copyOf(aLen); sumY = sumY.copyOf(aLen); cnt = cnt.copyOf(aLen) }
-
-    fun rehash() {
-        val newCap = cap * 2; val mask = newCap - 1
-        val nk = LongArray(newCap) { EMPTY }; val nv = IntArray(newCap)
-        for (i in hashKeys.indices) {
-            val k = hashKeys[i]
-            if (k != EMPTY) {
-                var p = (k * -7046029254386353131L).ushr(32).toInt() and mask
-                while (nk[p] != EMPTY) p = (p + 1) and mask
-                nk[p] = k; nv[p] = hashVals[i]
-            }
-        }
-        cap = newCap; hashKeys = nk; hashVals = nv
-    }
-
-    fun intern(id: Long): Int {
-        if (mapSize * 2 >= cap) { rehash(); if (aLen < cap / 2) growAccumulators() }
-        val mask = cap - 1
-        var p = (id * -7046029254386353131L).ushr(32).toInt() and mask
-        while (true) {
-            val k = hashKeys[p]
-            if (k == EMPTY) {
-                if (slotCount >= aLen) growAccumulators()
-                hashKeys[p] = id; hashVals[p] = slotCount; mapSize++
-                return slotCount++
-            }
-            if (k == id) return hashVals[p]
-            p = (p + 1) and mask
-        }
-    }
-
-    // Pass 1: assign segment slots and accumulate centroids.
-    val slotPerPixel = IntArray(pixelCount)
-    for (y in 0 until h) {
-        for (x in 0 until w) {
-            val slot = intern(segmentIdOf(x, y))
-            val idx = y * w + x
-            slotPerPixel[idx] = slot
-            sumX[slot] += x; sumY[slot] += y; cnt[slot]++
-        }
-    }
-
-    // Sample one colour per segment at its centroid.
-    val sampler = PixelSampler(source)
-    val colors = IntArray(slotCount)
-    for (s in 0 until slotCount) {
-        colors[s] = sampler.sample((sumX[s] / cnt[s]).toFloat(), (sumY[s] / cnt[s]).toFloat())
-    }
-
-    // Pass 2: map pixels to colours.
-    val pixels = IntArray(pixelCount) { colors[slotPerPixel[it]] }
-    val config = source.config ?: Bitmap.Config.ARGB_8888
-    val out = Bitmap.createBitmap(w, h, config)
-    out.setPixels(pixels, 0, w, 0, 0, w, h)
-    return out
+/** lowbias32 finalizer (Chris Wellons / hash-prospector): strong bit-avalanche. */
+private fun mix32(x: Int): Int {
+    var h = x
+    h = h xor (h ushr 16); h *= 0x7feb352d
+    h = h xor (h ushr 15); h *= 0x846ca68b.toInt()  // 0x846ca68b > Int.MAX_VALUE → Long literal, .toInt() reinterprets bits
+    h = h xor (h ushr 16); return h
 }
+
+/** Two-dimensional integer hash with an independent salt per decision. */
+private fun hashInt(x: Int, y: Int, salt: Int): Int =
+    mix32(mix32(x + salt * 0x9E3779B1.toInt()) + y)  // 0x9E3779B1 > Int.MAX_VALUE → Long literal
+
+/** Returns a float in [0, 1) derived from hash(x, y, salt). */
+private fun hashUnit(x: Int, y: Int, salt: Int): Float =
+    ((hashInt(x, y, salt) ushr 8) and 0xFFFFFF) / 16777216f
 
 /**
  * Equilateral triangle tessellation. Each rhombus cell of side [tile] contains two
@@ -302,10 +240,10 @@ private fun hexagonMosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed1: sparse recursive square subdivision. 25% of cells subdivide into 2×2 or
- * 3×3 (chosen by hash); within those, 25% of sub-squares split once more into 2×2.
- * Most cells (75%) stay whole, so subdivision reads as occasional scattered detail
- * rather than a uniform pattern.
+ * Mixed1: sparse recursive square subdivision. Driven by an avalanche hash so
+ * each cell's decision is independent of its neighbours (no checkerboard artifact).
+ * 25% of cells subdivide into 2×2 or 3×3; within those, 25% of sub-squares split
+ * once more into 2×2. Most cells (75%) stay whole.
  */
 private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
     val sampler = PixelSampler(source)
@@ -325,25 +263,22 @@ private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
         for (col in -1..numCols) {
             val x0 = col * tileF
             val y0 = row * tileF
-            // Natural Int overflow is fine here — we just need good bit distribution.
-            val hash = col * 1664525 + row * 1013904223
-            // 25% chance to subdivide (bottom 2 bits both zero).
-            if (hash and 0x3 != 0) {
+            // 25% chance to subdivide (salt 0).
+            if (hashUnit(col, row, 0) >= 0.25f) {
                 paint.color = sampler.sample(x0 + tileF / 2f, y0 + tileF / 2f)
                 canvas.drawRect(x0, y0, x0 + tileF, y0 + tileF, paint)
                 continue
             }
-            // Subdivide: 2×2 or 3×3 (bit 2 of hash).
-            val n = if (hash ushr 2 and 0x1 == 0) 2 else 3
+            // Subdivide: 2×2 or 3×3 (salt 1).
+            val n = if (hashUnit(col, row, 1) < 0.5f) 2 else 3
             val subW = tileF / n
             val subH = tileF / n
             for (sr in 0 until n) {
                 for (sc in 0 until n) {
                     val sx0 = x0 + sc * subW
                     val sy0 = y0 + sr * subH
-                    // Secondary: 25% chance to split this sub-square into 2×2.
-                    val subHash = (col * 73 + sc) * 1664525 + (row * 73 + sr) * 1013904223
-                    if (subHash and 0x3 == 0) {
+                    // Secondary: 25% chance to split this sub-square into 2×2 (salt 2).
+                    if (hashUnit(col * 4 + sc, row * 4 + sr, 2) < 0.25f) {
                         val ssW = subW / 2f
                         val ssH = subH / 2f
                         for (ssr in 0..1) {
@@ -366,118 +301,97 @@ private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed2: overlapping circles, segment-sampled. Circles are placed on a grid of
- * spacing [tile] but each circle's centre is independently jittered (up to ±35% of
- * [tile]) and its radius varied ([50%, 75%] of [tile]) via per-cell hashes. A 5×5
- * neighbourhood is scanned so the wider reach of jittered large circles is covered.
- * Every distinct combination of covering circles (and each gap's Voronoi cell) is
- * its own segment, sampling one true base-image colour at its centroid.
+ * Mixed2: translucent overlapping circles. A blurred base layer (bilinear
+ * downscale → bilinear upscale) fills the canvas, then antialiased circles
+ * at ~45% opacity are painted at jittered positions with varied radii. Overlapping
+ * translucent discs blend (SRC_OVER) into combined colours, creating a soft
+ * "colour blur" effect at circle intersections.
  */
 private fun mixed2Mosaic(source: Bitmap, tile: Int): Bitmap {
     val tileF = tile.toFloat()
+    val sW = source.width; val sH = source.height
+    val sWf = sW.toFloat(); val sHf = sH.toFloat()
 
-    return segmentSampledBitmap(source) { x, y ->
-        val xf = x.toFloat()
-        val yf = y.toFloat()
-        val baseCol = floor(xf / tileF).toInt()
-        val baseRow = floor(yf / tileF).toInt()
+    // Base layer: smooth blur via bilinear downscale then bilinear upscale.
+    val baseW = max(1, sW / tile); val baseH = max(1, sH / tile)
+    val base = source.scale(baseW, baseH, filter = true)
+    val (out, canvas) = newCanvasBitmap(source)
+    val blitPaint = Paint().apply { isFilterBitmap = true }
+    canvas.drawBitmap(base, Rect(0, 0, baseW, baseH), Rect(0, 0, sW, sH), blitPaint)
+    if (base != source) base.recycle()
 
-        var key = 1L
-        var covered = false
-        // 5×5 window: jitter up to ±0.35·tile + radius up to 0.75·tile → reach ≤ 1.1·tile.
-        for (dRow in -2..2) {
-            for (dCol in -2..2) {
-                val col = baseCol + dCol
-                val row = baseRow + dRow
-                // Two hash passes for independent axes / radius.
-                val h1 = col * 1664525 + row * 1013904223
-                val h2 = h1 * -1640531535  // second Knuth pass (2654435761.toInt())
-                // Centre jitter: ±0.35·tile on each axis.
-                val jx = ((h1 and 0xFFFF).toFloat() / 65536f - 0.5f) * 0.7f * tileF
-                val jy = ((h2 and 0xFFFF).toFloat() / 65536f - 0.5f) * 0.7f * tileF
-                // Radius: 50%–75% of tile.
-                val r = (0.5f + ((h1 ushr 16 and 0xFF).toFloat() / 255f) * 0.25f) * tileF
-                val cx = col * tileF + tileF * 0.5f + jx
-                val cy = row * tileF + tileF * 0.5f + jy
-                val dx = xf - cx; val dy = yf - cy
-                if (dx * dx + dy * dy <= r * r) {
-                    key = key * 1_000_003L + col.toLong() * 10_000L + row.toLong()
-                    covered = true
-                }
-            }
-        }
-        if (!covered) {
-            val nearCol = ((xf / tileF) + 0.5f).toInt()
-            val nearRow = ((yf / tileF) + 0.5f).toInt()
-            -(nearCol.toLong() * 100_000L + nearRow.toLong() + 1_000_000_000L)
-        } else {
-            // Guard against the EMPTY sentinel used by segmentSampledBitmap.
-            if (key == Long.MIN_VALUE) key + 1L else key
+    val sampler = PixelSampler(source)
+    val circlePaint = Paint().apply {
+        isAntiAlias = true
+        style = Paint.Style.FILL
+    }
+    val colMin = -2; val colMax = ceil(sWf / tileF).toInt() + 2
+    val rowMin = -2; val rowMax = ceil(sHf / tileF).toInt() + 2
+
+    for (row in rowMin..rowMax) {
+        for (col in colMin..colMax) {
+            val jx = (hashUnit(col, row, 3) - 0.5f) * tileF    // ±0.5 tile
+            val jy = (hashUnit(col, row, 4) - 0.5f) * tileF
+            val r = (0.4f + hashUnit(col, row, 5) * 0.6f) * tileF  // [0.4, 1.0] * tile
+            val cx = col * tileF + tileF * 0.5f + jx
+            val cy = row * tileF + tileF * 0.5f + jy
+            if (cx + r < 0 || cx - r > sWf || cy + r < 0 || cy - r > sHf) continue
+            // Bake alpha ~45% (0x73) into the colour; paint.color= overwrites alpha.
+            val rgb = sampler.sample(cx, cy) and 0x00FFFFFF
+            circlePaint.color = (0x73 shl 24) or rgb
+            canvas.drawCircle(cx, cy, r, circlePaint)
         }
     }
+    return out
 }
 
 /**
- * Returns a compact Int identifying which triangle in an equilateral tessellation
- * covers pixel ([px], [py]). The grid uses [tileF] as the base size, [rowH] as the
- * row height (`tile * sqrt(3) / 2`), and is globally shifted by ([offsetX], [offsetY]).
- *
- * The rhombus row-offset makes the cell boundaries diagonal, so the naive `floor` cell
- * can contain a left-wedge strip [fx < 0.5·fy] that geometrically belongs to triangle B
- * of the previous rhombus. This function handles all three cases correctly.
- */
-private fun triangleIndexAt(
-    px: Float, py: Float,
-    tileF: Float, rowH: Float,
-    offsetX: Float, offsetY: Float
-): Int {
-    val localY = py - offsetY
-    val j = floor(localY / rowH).toInt()
-    val rowOffsetX = j * tileF / 2f + offsetX
-    val lx = px - rowOffsetX
-    val i = floor(lx / tileF).toInt()
-    val lxRel = lx - i * tileF  // ∈ [0, tileF)
-    val lyRel = localY - j * rowH // ∈ [0, rowH)
-    val fx = lxRel / tileF  // ∈ [0, 1)
-    val fy = lyRel / rowH   // ∈ [0, 1)
-
-    return when {
-        fx < 0.5f * fy -> {
-            // Left wedge: belongs to triangle B of rhombus (i−1, j).
-            val ci = i - 1
-            ((ci + 1000) shl 16) or ((j + 1000) shl 1) or 1
-        }
-        fx > 1f - 0.5f * fy -> {
-            // Right wedge within rhombus i: triangle B of (i, j).
-            ((i + 1000) shl 16) or ((j + 1000) shl 1) or 1
-        }
-        else -> {
-            // Triangle A of rhombus (i, j).
-            ((i + 1000) shl 16) or ((j + 1000) shl 1) or 0
-        }
-    }
-}
-
-/**
- * Mixed3: overlapping equilateral triangle grids, segment-sampled. Two triangle
- * tessellations are overlaid with a half-tile horizontal and half-row-height vertical
- * offset so their edges intersect at different angles. Every crossing region formed by
- * the union of both grids is its own segment, sampling one true base-image colour at
- * its centroid — crisp stained-glass polygons with no alpha-blending.
+ * Mixed3: irregular triangle mesh. An equilateral triangle lattice is rendered
+ * with each vertex independently jittered (±30% of tile in x, ±30% of row-height
+ * in y) via an avalanche hash. Because all three vertices of every shared edge use
+ * the same hash function keyed on their grid coordinates, adjacent triangles share
+ * identical jittered vertices — the mesh is watertight with no gaps or overlaps.
+ * Each triangle is filled with the colour sampled at its (jittered) centroid.
  */
 private fun mixed3Mosaic(source: Bitmap, tile: Int): Bitmap {
+    val sampler = PixelSampler(source)
+    val (out, canvas) = newCanvasBitmap(source)
+    val paint = Paint().apply {
+        isAntiAlias = false
+        isDither = false
+        style = Paint.Style.FILL
+    }
+    val path = Path()
     val tileF = tile.toFloat()
     val rowH = tile * sqrt(3f) / 2f
-    val bOffsetX = tileF * 0.5f
-    val bOffsetY = rowH * 0.5f
+    val sW = source.width.toFloat(); val sH = source.height.toFloat()
 
-    return segmentSampledBitmap(source) { x, y ->
-        val xf = x.toFloat()
-        val yf = y.toFloat()
-        val idA = triangleIndexAt(xf, yf, tileF, rowH, 0f, 0f)
-        val idB = triangleIndexAt(xf, yf, tileF, rowH, bOffsetX, bOffsetY)
-        idA.toLong() shl 32 or (idB.toLong() and 0xFFFFFFFFL)
+    // Jittered lattice vertex L(i,j). Shared vertices compute identically → watertight.
+    fun vx(i: Int, j: Int) = i * tileF + j * tileF / 2f + (hashUnit(i, j, 6) - 0.5f) * 0.6f * tileF
+    fun vy(i: Int, j: Int) = j * rowH + (hashUnit(i, j, 7) - 0.5f) * 0.6f * rowH
+
+    val jMin = -1; val jMax = ceil(sH / rowH).toInt() + 1
+    for (j in jMin..jMax) {
+        val rowOffsetX = j * (tileF / 2f)
+        val iMin = floor(-rowOffsetX / tileF).toInt() - 2
+        val iMax = ceil((sW - rowOffsetX) / tileF).toInt() + 2
+        for (i in iMin..iMax) {
+            // Triangle A: L(i,j), L(i+1,j), L(i,j+1)
+            val ax = vx(i, j);   val ay = vy(i, j)
+            val bx = vx(i+1, j); val by = vy(i+1, j)
+            val cx = vx(i, j+1); val cy = vy(i, j+1)
+            paint.color = sampler.sample((ax + bx + cx) / 3f, (ay + by + cy) / 3f)
+            path.rewind(); path.moveTo(ax, ay); path.lineTo(bx, by); path.lineTo(cx, cy)
+            path.close(); canvas.drawPath(path, paint)
+
+            // Triangle B: L(i+1,j), L(i+1,j+1), L(i,j+1)
+            val dx = vx(i+1, j+1); val dy = vy(i+1, j+1)
+            paint.color = sampler.sample((bx + dx + cx) / 3f, (by + dy + cy) / 3f)
+            path.rewind(); path.moveTo(bx, by); path.lineTo(dx, dy); path.lineTo(cx, cy)
+            path.close(); canvas.drawPath(path, paint)
+        }
     }
+    return out
 }
 
 /**
@@ -486,6 +400,9 @@ private fun mixed3Mosaic(source: Bitmap, tile: Int): Bitmap {
  * sub-triangles (3 corner + 1 central inverted), and each of those has a 25% chance
  * of splitting once more (depth cap 2). Most triangles stay whole; subdivision reads
  * as scattered, irregular detail.
+ *
+ * Split decisions are driven by [mix32] avalanche hashes of a node-local integer key
+ * so adjacent triangles are uncorrelated (no checkerboard / lattice artifacts).
  */
 private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
     val sampler = PixelSampler(source)
@@ -506,20 +423,19 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
         bx: Float, by: Float,
         cx: Float, cy: Float,
         depth: Int,
-        seed: Long
+        nodeHash: Int
     ) {
-        // ~25% chance to split at each level; stop at depth 2.
-        val doSplit = depth < 2 && ((seed * 2654435761L).toInt() and 0x3) == 0
+        // 25%: top 2 bits of avalanche-mixed node hash are both 0.
+        val doSplit = depth < 2 && mix32(nodeHash) ushr 30 == 0
         if (doSplit) {
             val mabx = (ax + bx) / 2f; val maby = (ay + by) / 2f
             val mbcx = (bx + cx) / 2f; val mbcy = (by + cy) / 2f
             val mcax = (cx + ax) / 2f; val mcay = (cy + ay) / 2f
-            val s = seed * 6364136223846793005L + 1442695040888963407L
-            drawTri(ax, ay, mabx, maby, mcax, mcay, depth + 1, s)
-            drawTri(mabx, maby, bx, by, mbcx, mbcy, depth + 1, s + 1L)
-            drawTri(mcax, mcay, mbcx, mbcy, cx, cy, depth + 1, s + 2L)
+            drawTri(ax, ay, mabx, maby, mcax, mcay, depth + 1, nodeHash * 4 + 1)
+            drawTri(mabx, maby, bx, by, mbcx, mbcy, depth + 1, nodeHash * 4 + 2)
+            drawTri(mcax, mcay, mbcx, mbcy, cx, cy, depth + 1, nodeHash * 4 + 3)
             // Central inverted triangle.
-            drawTri(mabx, maby, mbcx, mbcy, mcax, mcay, depth + 1, s + 3L)
+            drawTri(mabx, maby, mbcx, mbcy, mcax, mcay, depth + 1, nodeHash * 4 + 4)
         } else {
             paint.color = sampler.sample((ax + bx + cx) / 3f, (ay + by + cy) / 3f)
             path.rewind()
@@ -542,9 +458,8 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
             val v10x = v00x + tileF
             val v01x = v00x + tileF / 2f
             val v11x = v01x + tileF
-            val baseSeed = i * 1664525L + j * 1013904223L
-            drawTri(v00x, y0, v10x, y0, v01x, y1, 0, baseSeed)
-            drawTri(v10x, y0, v11x, y1, v01x, y1, 0, baseSeed xor 0xDEAD_BEEFL)
+            drawTri(v00x, y0, v10x, y0, v01x, y1, 0, hashInt(i, j, 202))
+            drawTri(v10x, y0, v11x, y1, v01x, y1, 0, hashInt(i, j, 101))
         }
     }
     return out
