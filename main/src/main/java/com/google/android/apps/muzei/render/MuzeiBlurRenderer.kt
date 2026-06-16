@@ -18,7 +18,10 @@ package com.google.android.apps.muzei.render
 
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.RectF
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
@@ -47,6 +50,7 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 sealed class SwitchingPhotos(val viewportId: Int)
 data class SwitchingPhotosInProgress(private val currentId: Int) : SwitchingPhotos(currentId)
@@ -75,6 +79,7 @@ class MuzeiBlurRenderer(
         const val DEFAULT_GREY = 0 // max 500
         const val DEFAULT_MAX_DIM = 128 // technical max 255
         const val DEFAULT_MOSAIC = 100 // max 500
+        const val DEFAULT_MOSAIC_OPACITY = 500 // max 500; 500 = full mosaic (preserves existing look)
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
         const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
         private const val DEMO_BLUR = 250
@@ -93,8 +98,10 @@ class MuzeiBlurRenderer(
     private var maxDim: Int = 0
     private var maxGrey: Int = 0
     private var mosaicAmount: Int = DEFAULT_MOSAIC
+    private var mosaicOpacity: Int = DEFAULT_MOSAIC_OPACITY
     private var currentEffectMode: String = DEFAULT_EFFECT_MODE
     private var currentMosaicShape: MosaicShape = MosaicShape.SQUARE
+    private var mosaicRandom: Boolean = false
 
     // Model and view matrices. Projection and MVP stored in picture set
     private val modelMatrix = FloatArray(16)
@@ -123,6 +130,7 @@ class MuzeiBlurRenderer(
     private var dimPreferenceName = Prefs.PREF_DIM_AMOUNT
     private var greyPreferenceName = Prefs.PREF_GREY_AMOUNT
     private var mosaicPreferenceName = Prefs.PREF_MOSAIC_AMOUNT
+    private var mosaicOpacityPreferenceName = Prefs.PREF_MOSAIC_OPACITY
     private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
     private var mosaicShapePreferenceName = Prefs.PREF_MOSAIC_SHAPE
     private var blurRelatedToArtDetailMode = false
@@ -143,6 +151,7 @@ class MuzeiBlurRenderer(
         recomputeMaxDimAmount()
         recomputeGreyAmount()
         recomputeMosaicAmount()
+        recomputeMosaicOpacity()
         recomputeEffectMode()
         recomputeMosaicShape()
     }
@@ -195,6 +204,15 @@ class MuzeiBlurRenderer(
                 .coerceIn(0, 500)
     }
 
+    fun recomputeMosaicOpacity(
+            newMosaicOpacityPreferenceName: String = mosaicOpacityPreferenceName
+    ) {
+        mosaicOpacityPreferenceName = newMosaicOpacityPreferenceName
+        mosaicOpacity = Prefs.getSharedPreferences(context)
+                .getInt(mosaicOpacityPreferenceName, DEFAULT_MOSAIC_OPACITY)
+                .coerceIn(0, 500)
+    }
+
     fun recomputeEffectMode(
             newEffectModePreferenceName: String = effectModePreferenceName
     ) {
@@ -211,9 +229,14 @@ class MuzeiBlurRenderer(
         val raw = Prefs.getSharedPreferences(context)
                 .getString(mosaicShapePreferenceName, DEFAULT_MOSAIC_SHAPE)
                 ?: DEFAULT_MOSAIC_SHAPE
+        mosaicRandom = raw == Prefs.MOSAIC_SHAPE_RANDOM
         currentMosaicShape = when (raw) {
             Prefs.MOSAIC_SHAPE_TRIANGLE -> MosaicShape.TRIANGLE
             Prefs.MOSAIC_SHAPE_HEXAGON -> MosaicShape.HEXAGON
+            Prefs.MOSAIC_SHAPE_MIXED1 -> MosaicShape.MIXED1
+            Prefs.MOSAIC_SHAPE_MIXED2 -> MosaicShape.MIXED2
+            Prefs.MOSAIC_SHAPE_MIXED3 -> MosaicShape.MIXED3
+            Prefs.MOSAIC_SHAPE_MIXED4 -> MosaicShape.MIXED4
             else -> MosaicShape.SQUARE
         }
     }
@@ -463,7 +486,13 @@ class MuzeiBlurRenderer(
                         }
 
                         if (mosaicActive) {
-                            generateMosaicKeyframes(scaledBitmap, scaledHeight)
+                            val effectiveShape = if (mosaicRandom) {
+                                val allShapes = MosaicShape.values()
+                                allShapes[Random(imageLoader.seed).nextInt(allShapes.size)]
+                            } else {
+                                currentMosaicShape
+                            }
+                            generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape)
                         } else {
                             generateBlurKeyframes(scaledBitmap)
                         }
@@ -649,20 +678,39 @@ class MuzeiBlurRenderer(
         private fun generateMosaicKeyframes(
             scaledBitmap: android.graphics.Bitmap,
             scaledHeight: Int,
+            effectiveShape: MosaicShape,
         ) {
             val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
-                val pixelated = mosaicBitmap(scaledBitmap, tilePx, currentMosaicShape)
-                val desaturateAmount = maxGrey / 500f * f / blurKeyframes
-                val finalBitmap = if (desaturateAmount > 0f && pixelated != null) {
-                    val blurrer = ImageBlurrer(context, pixelated)
-                    val out = blurrer.blurBitmap(0f, desaturateAmount)
-                    blurrer.destroy()
+                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape)
+
+                // Blend the mosaic over the (original) scaled photo when opacity < 500.
+                // This respects grey (desaturate step below) and dim (draw-time overlay).
+                val blended = if (mosaicOpacity < 500 && pixelated != null) {
+                    val config = scaledBitmap.config ?: Bitmap.Config.ARGB_8888
+                    val composite = Bitmap.createBitmap(scaledBitmap.width, scaledBitmap.height, config)
+                    val compositeCanvas = Canvas(composite)
+                    compositeCanvas.drawBitmap(scaledBitmap, 0f, 0f, null)
+                    val alphaPaint = Paint().apply {
+                        alpha = (mosaicOpacity / 500f * 255).toInt().coerceIn(0, 255)
+                    }
+                    compositeCanvas.drawBitmap(pixelated, 0f, 0f, alphaPaint)
                     pixelated.recycle()
-                    out
+                    composite
                 } else {
                     pixelated
+                }
+
+                val desaturateAmount = maxGrey / 500f * f / blurKeyframes
+                val finalBitmap = if (desaturateAmount > 0f && blended != null) {
+                    val blurrer = ImageBlurrer(context, blended)
+                    val out = blurrer.blurBitmap(0f, desaturateAmount)
+                    blurrer.destroy()
+                    blended.recycle()
+                    out
+                } else {
+                    blended
                 }
                 pictures[f] = finalBitmap?.toGLPicture()
                 finalBitmap?.recycle()

@@ -142,6 +142,8 @@ fun EffectsSettings(
                 else Prefs.PREF_LOCK_EFFECT_MODE
             val mosaicPref = if (page == 0) Prefs.PREF_MOSAIC_AMOUNT
                 else Prefs.PREF_LOCK_MOSAIC_AMOUNT
+            val mosaicOpacityPref = if (page == 0) Prefs.PREF_MOSAIC_OPACITY
+                else Prefs.PREF_LOCK_MOSAIC_OPACITY
             val mosaicShapePref = if (page == 0) Prefs.PREF_MOSAIC_SHAPE
                 else Prefs.PREF_LOCK_MOSAIC_SHAPE
             EffectsScreen(
@@ -151,6 +153,7 @@ fun EffectsSettings(
                 greyPref = greyPref,
                 effectModePref = effectModePref,
                 mosaicPref = mosaicPref,
+                mosaicOpacityPref = mosaicOpacityPref,
                 mosaicShapePref = mosaicShapePref,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -286,6 +289,32 @@ private fun EffectsSettingsActions(
             }
             launch {
                 prefs.callbackFlow(
+                    Prefs.PREF_MOSAIC_OPACITY,
+                    MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putInt(Prefs.PREF_LOCK_MOSAIC_OPACITY, newValue)
+                    }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_MOSAIC_OPACITY,
+                    MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit {
+                        putInt(Prefs.PREF_MOSAIC_OPACITY, newValue)
+                    }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
                     Prefs.PREF_EFFECT_MODE,
                     MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
                     getValue = { prefs, prefName, defaultValue ->
@@ -381,6 +410,13 @@ private fun EffectsSettingsActions(
                             MuzeiBlurRenderer.DEFAULT_MOSAIC
                         )
                     )
+                    putInt(
+                        Prefs.PREF_LOCK_MOSAIC_OPACITY,
+                        prefs.getInt(
+                            Prefs.PREF_MOSAIC_OPACITY,
+                            MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
+                        )
+                    )
                     putString(
                         Prefs.PREF_LOCK_EFFECT_MODE,
                         prefs.getString(
@@ -425,6 +461,13 @@ private fun EffectsSettingsActions(
                         prefs.getInt(
                             Prefs.PREF_LOCK_MOSAIC_AMOUNT,
                             MuzeiBlurRenderer.DEFAULT_MOSAIC
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_MOSAIC_OPACITY,
+                        prefs.getInt(
+                            Prefs.PREF_LOCK_MOSAIC_OPACITY,
+                            MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
                         )
                     )
                     putString(
@@ -515,6 +558,14 @@ private fun EffectsSettingsActions(
                     putInt(
                         Prefs.PREF_LOCK_MOSAIC_AMOUNT,
                         MuzeiBlurRenderer.DEFAULT_MOSAIC
+                    )
+                    putInt(
+                        Prefs.PREF_MOSAIC_OPACITY,
+                        MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_MOSAIC_OPACITY,
+                        MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
                     )
                     putString(
                         Prefs.PREF_EFFECT_MODE,

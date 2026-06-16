@@ -24,7 +24,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -32,6 +35,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,6 +67,7 @@ fun EffectsScreen(
     greyPref: String,
     effectModePref: String,
     mosaicPref: String,
+    mosaicOpacityPref: String,
     mosaicShapePref: String,
     modifier: Modifier = Modifier,
 ) {
@@ -74,6 +79,8 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, greyPref, MuzeiBlurRenderer.DEFAULT_GREY)
     val mosaic =
         rememberPreferenceSourcedValue(prefs, mosaicPref, MuzeiBlurRenderer.DEFAULT_MOSAIC)
+    val mosaicOpacity =
+        rememberPreferenceSourcedValue(prefs, mosaicOpacityPref, MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY)
     val effectMode = rememberPreferenceSourcedStringValue(
         prefs, effectModePref, MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
     )
@@ -89,6 +96,9 @@ fun EffectsScreen(
         mosaic = mosaic.value,
         onMosaicChange = { mosaic.value = it },
         onMosaicChangeFinished = { mosaic.userControlled = false },
+        mosaicOpacity = mosaicOpacity.value,
+        onMosaicOpacityChange = { mosaicOpacity.value = it },
+        onMosaicOpacityChangeFinished = { mosaicOpacity.userControlled = false },
         mosaicShape = mosaicShape.value,
         onMosaicShapeChange = { mosaicShape.value = it },
         dim = dim.value,
@@ -111,6 +121,9 @@ fun EffectsScreen(
     mosaic: Int,
     onMosaicChange: (Int) -> Unit,
     onMosaicChangeFinished: (() -> Unit),
+    mosaicOpacity: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
+    onMosaicOpacityChange: (Int) -> Unit = {},
+    onMosaicOpacityChangeFinished: (() -> Unit) = {},
     mosaicShape: String,
     onMosaicShapeChange: (String) -> Unit,
     dim: Int,
@@ -160,6 +173,9 @@ fun EffectsScreen(
             mosaic = mosaic,
             onMosaicChange = onMosaicChange,
             onMosaicChangeFinished = onMosaicChangeFinished,
+            mosaicOpacity = mosaicOpacity,
+            onMosaicOpacityChange = onMosaicOpacityChange,
+            onMosaicOpacityChangeFinished = onMosaicOpacityChangeFinished,
             dim = dim,
             onDimChange = onDimChange,
             onDimChangeFinished = onDimChangeFinished,
@@ -200,7 +216,6 @@ private fun EffectModeSelector(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MosaicShapeSelector(
     shape: String,
@@ -211,22 +226,31 @@ private fun MosaicShapeSelector(
         Prefs.MOSAIC_SHAPE_SQUARE to R.string.settings_mosaic_shape_square,
         Prefs.MOSAIC_SHAPE_TRIANGLE to R.string.settings_mosaic_shape_triangle,
         Prefs.MOSAIC_SHAPE_HEXAGON to R.string.settings_mosaic_shape_hexagon,
+        Prefs.MOSAIC_SHAPE_RANDOM to R.string.settings_mosaic_shape_random,
+        Prefs.MOSAIC_SHAPE_MIXED1 to R.string.settings_mosaic_shape_mixed1,
+        Prefs.MOSAIC_SHAPE_MIXED2 to R.string.settings_mosaic_shape_mixed2,
+        Prefs.MOSAIC_SHAPE_MIXED3 to R.string.settings_mosaic_shape_mixed3,
+        Prefs.MOSAIC_SHAPE_MIXED4 to R.string.settings_mosaic_shape_mixed4,
     )
-    SingleChoiceSegmentedButtonRow(modifier = modifier) {
-        options.forEachIndexed { index, (value, label) ->
-            SegmentedButton(
+    FlowRow(modifier = modifier) {
+        options.forEach { (value, label) ->
+            FilterChip(
                 selected = shape == value,
                 onClick = { onShapeChange(value) },
-                shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                colors = SegmentedButtonDefaults.colors(
-                    activeContainerColor = Color.White.copy(alpha = 0.18f),
-                    activeContentColor = Color.White,
-                    inactiveContainerColor = Color.Transparent,
-                    inactiveContentColor = Color.White,
+                label = { Text(text = stringResource(label)) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = Color.Transparent,
+                    labelColor = Color.White,
+                    selectedContainerColor = Color.White.copy(alpha = 0.18f),
+                    selectedLabelColor = Color.White,
                 ),
-            ) {
-                Text(text = stringResource(label))
-            }
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = shape == value,
+                    borderColor = Color.White.copy(alpha = 0.5f),
+                    selectedBorderColor = Color.White,
+                ),
+            )
         }
     }
 }
@@ -241,6 +265,9 @@ private fun EffectsGrid(
     mosaic: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC,
     onMosaicChange: (Int) -> Unit = {},
     onMosaicChangeFinished: (() -> Unit) = {},
+    mosaicOpacity: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
+    onMosaicOpacityChange: (Int) -> Unit = {},
+    onMosaicOpacityChangeFinished: (() -> Unit) = {},
     dim: Int = MuzeiBlurRenderer.DEFAULT_MAX_DIM,
     onDimChange: (Int) -> Unit = {},
     onDimChangeFinished: (() -> Unit) = {},
@@ -254,6 +281,7 @@ private fun EffectsGrid(
         inactiveTrackColor = Color.DarkGray,
     )
     val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
+    val rowCount = 3 + (if (isMosaic) 1 else 0)
     Layout(
         content = {
             // Titles
@@ -266,6 +294,14 @@ private fun EffectsGrid(
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
+            if (isMosaic) {
+                Text(
+                    text = stringResource(R.string.settings_mosaic_opacity_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
             Text(
                 text = stringResource(R.string.settings_dim_amount_title),
                 modifier = Modifier.padding(vertical = 8.dp),
@@ -286,6 +322,14 @@ private fun EffectsGrid(
                     modifier = Modifier.padding(vertical = 8.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onMosaicChangeFinished,
+                    colors = sliderColors,
+                )
+                Slider(
+                    value = mosaicOpacity.toFloat(),
+                    onValueChange = { onMosaicOpacityChange(it.toInt()) },
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    valueRange = 0f..500f,
+                    onValueChangeFinished = onMosaicOpacityChangeFinished,
                     colors = sliderColors,
                 )
             } else {

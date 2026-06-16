@@ -16,6 +16,7 @@
 
 package com.google.android.apps.muzei.render
 
+import android.content.ContentUris
 import android.content.Context
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.apps.muzei.api.MuzeiContract
@@ -50,6 +51,12 @@ class RealRenderController(
         }
     }
 
-    override suspend fun openDownloadedCurrentArtwork() =
-            ContentUriImageLoader(context.contentResolver, currentArtworkUri)
+    override suspend fun openDownloadedCurrentArtwork(): ContentUriImageLoader {
+        val seed = try {
+            ContentUris.parseId(currentArtworkUri)
+        } catch (_: Exception) {
+            currentArtworkUri.hashCode().toLong()
+        }
+        return ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
+    }
 }

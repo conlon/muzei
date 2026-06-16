@@ -24,11 +24,17 @@
     <string name="settings_dim_amount_title">Dim</string>
     <string name="settings_grey_amount_title">Grey</string>
     <string name="settings_mosaic_amount_title">Tile size</string>
+    <string name="settings_mosaic_opacity_title">Effect strength</string>
     <string name="settings_effect_mode_blur">Blur</string>
     <string name="settings_effect_mode_mosaic">Mosaic</string>
     <string name="settings_mosaic_shape_square">Square</string>
     <string name="settings_mosaic_shape_triangle">Triangle</string>
     <string name="settings_mosaic_shape_hexagon">Hexagon</string>
+    <string name="settings_mosaic_shape_random">Random</string>
+    <string name="settings_mosaic_shape_mixed1">Mixed 1</string>
+    <string name="settings_mosaic_shape_mixed2">Mixed 2</string>
+    <string name="settings_mosaic_shape_mixed3">Mixed 3</string>
+    <string name="settings_mosaic_shape_mixed4">Mixed 4</string>
 
     <string name="notification_new_wallpaper">New wallpaper</string>
     <string name="notification_new_wallpaper_channel_name">New wallpapers</string>
