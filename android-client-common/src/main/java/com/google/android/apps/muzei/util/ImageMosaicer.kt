@@ -159,9 +159,13 @@ private fun triangleMosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Flat-top regular hexagons. Each hexagon has side length [tile]; columns are spaced
- * by 1.5 * tile horizontally; alternating columns offset by sqrt(3)/2 * tile vertically.
- * Tile colour is sampled at the hexagon centre.
+ * Flat-top regular hexagons. [tile] is the hexagon's **flat-to-flat height**
+ * (the distance between two parallel sides), matching the vertical pitch used by
+ * [squareMosaic] and [triangleMosaic] so all three shapes appear the same size
+ * on screen for the same slider value. The circumradius is derived internally as
+ * `r = tile / sqrt(3)`.
+ * Columns are spaced by `1.5 * r` horizontally; alternating columns are offset
+ * by `tile / 2` vertically. Tile colour is sampled at the hexagon centre.
  */
 private fun hexagonMosaic(source: Bitmap, tile: Int): Bitmap {
     val sampler = PixelSampler(source)
@@ -175,8 +179,10 @@ private fun hexagonMosaic(source: Bitmap, tile: Int): Bitmap {
     val sW = source.width.toFloat()
     val sH = source.height.toFloat()
     val tileF = tile.toFloat()
-    val colSpacing = 1.5f * tileF
-    val rowSpacing = sqrt(3f) * tileF
+    // Circumradius derived from the flat-to-flat extent (tile = sqrt(3) * r).
+    val r = tileF / sqrt(3f)
+    val colSpacing = 1.5f * r
+    val rowSpacing = tileF          // = sqrt(3) * r — same vertical pitch as square/triangle
     val colCount = ceil(sW / colSpacing).toInt() + 2
     val rowCount = ceil(sH / rowSpacing).toInt() + 2
 
@@ -185,8 +191,8 @@ private fun hexagonMosaic(source: Bitmap, tile: Int): Bitmap {
     val vy = FloatArray(6)
     for (k in 0..5) {
         val angle = (k * 60f) * PI.toFloat() / 180f
-        vx[k] = tileF * cos(angle)
-        vy[k] = tileF * sin(angle)
+        vx[k] = r * cos(angle)
+        vy[k] = r * sin(angle)
     }
 
     for (col in -1..colCount) {

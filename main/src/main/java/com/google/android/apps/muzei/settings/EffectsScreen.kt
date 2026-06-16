@@ -142,6 +142,15 @@ fun EffectsScreen(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
         )
+        if (isMosaic) {
+            MosaicShapeSelector(
+                shape = mosaicShape,
+                onShapeChange = onMosaicShapeChange,
+                modifier = contentModifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+            )
+        }
         EffectsGrid(
             modifier = contentModifier,
             effectMode = effectMode,
@@ -158,15 +167,6 @@ fun EffectsScreen(
             onGreyChange = onGreyChange,
             onGreyChangeFinished = onGreyChangeFinished,
         )
-        if (isMosaic) {
-            MosaicShapeSelector(
-                shape = mosaicShape,
-                onShapeChange = onMosaicShapeChange,
-                modifier = contentModifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            )
-        }
     }
 }
 
