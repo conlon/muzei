@@ -221,11 +221,20 @@ class MuzeiBlurRenderer(
         }
     }
 
-    private fun mosaicTilePixelsAtFrame(scaledHeight: Int, f: Int): Int {
+    private fun mosaicTilePixelsAtFrame(
+            scaledHeight: Int,
+            f: Int,
+            visibleImageHeightFraction: Float
+    ): Int {
         if (mosaicAmount <= 0) return 1
         val frameFraction = f.toFloat() / blurKeyframes
         val amountFraction = mosaicAmount / 500f
-        val tile = amountFraction * MOSAIC_MAX_TILE_FRACTION * scaledHeight * frameFraction
+        // Multiply by the fraction of the source image height that's actually visible
+        // on screen (smaller when framing zooms in, or when the image is narrower than
+        // the screen). This keeps the on-screen tile size constant regardless of
+        // per-image framing/zoom.
+        val tile = amountFraction * MOSAIC_MAX_TILE_FRACTION *
+                scaledHeight * visibleImageHeightFraction * frameFraction
         return max(1, tile.toInt())
     }
 
@@ -638,12 +647,37 @@ class MuzeiBlurRenderer(
             blurrer.destroy()
         }
 
+        /**
+         * The fraction of the source image height that is visible on screen,
+         * computed from data known at bake time (saved viewport, or bitmap/screen
+         * aspect ratios). Multiplying source-pixel tile sizes by this fraction
+         * cancels out the projection zoom so that on-screen tile size is constant
+         * regardless of per-image framing.
+         *
+         * Dynamic zooms (live art-detail pinch up to 5×, home-screen parallax 1.0–1.1×)
+         * are NOT compensated here — the mosaic is baked once per image and those zooms
+         * apply after the fact. In practice this is invisible because the mosaic is only
+         * shown while the wallpaper is blurred; the sharp original is displayed during
+         * interactive framing.
+         */
+        private fun staticVisibleHeightFraction(): Float {
+            val saved = savedViewport
+            return if (saved != null) {
+                saved.height().coerceIn(0.01f, 1f)
+            } else {
+                val screenToBitmapAspectRatio = if (bitmapAspectRatio > 0f)
+                    aspectRatio / bitmapAspectRatio else 1f
+                1f / max(1f, screenToBitmapAspectRatio)
+            }
+        }
+
         private fun generateMosaicKeyframes(
             scaledBitmap: android.graphics.Bitmap,
             scaledHeight: Int,
         ) {
+            val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
-                val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f)
+                val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
                 val pixelated = mosaicBitmap(scaledBitmap, tilePx, currentMosaicShape)
                 val desaturateAmount = maxGrey / 500f * f / blurKeyframes
                 val finalBitmap = if (desaturateAmount > 0f && pixelated != null) {
