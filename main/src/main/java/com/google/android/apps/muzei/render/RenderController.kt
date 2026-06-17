@@ -67,6 +67,12 @@ abstract class RenderController(
                         if (value) Prefs.PREF_LOCK_MOSAIC_AMOUNT else Prefs.PREF_MOSAIC_AMOUNT)
                 renderer.recomputeMosaicOpacity(
                         if (value) Prefs.PREF_LOCK_MOSAIC_OPACITY else Prefs.PREF_MOSAIC_OPACITY)
+                renderer.recomputeGlitchDisplacement(
+                        if (value) Prefs.PREF_LOCK_GLITCH_DISPLACEMENT else Prefs.PREF_GLITCH_DISPLACEMENT)
+                renderer.recomputeGlitchChannelSplit(
+                        if (value) Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT else Prefs.PREF_GLITCH_CHANNEL_SPLIT)
+                renderer.recomputeGlitchPixelSort(
+                        if (value) Prefs.PREF_LOCK_GLITCH_PIXEL_SORT else Prefs.PREF_GLITCH_PIXEL_SORT)
                 renderer.recomputeEffectMode(
                         if (value) Prefs.PREF_LOCK_EFFECT_MODE else Prefs.PREF_EFFECT_MODE)
                 renderer.recomputeMosaicShape(
@@ -101,6 +107,18 @@ abstract class RenderController(
                     renderer.recomputeMosaicOpacity()
                     throttledForceReloadCurrentArtwork()
                 }
+                Prefs.PREF_LOCK_GLITCH_DISPLACEMENT -> {
+                    renderer.recomputeGlitchDisplacement()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT -> {
+                    renderer.recomputeGlitchChannelSplit()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_LOCK_GLITCH_PIXEL_SORT -> {
+                    renderer.recomputeGlitchPixelSort()
+                    throttledForceReloadCurrentArtwork()
+                }
                 Prefs.PREF_LOCK_EFFECT_MODE -> {
                     renderer.recomputeEffectMode()
                     throttledForceReloadCurrentArtwork()
@@ -130,6 +148,18 @@ abstract class RenderController(
                 }
                 Prefs.PREF_MOSAIC_OPACITY -> {
                     renderer.recomputeMosaicOpacity()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_GLITCH_DISPLACEMENT -> {
+                    renderer.recomputeGlitchDisplacement()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_GLITCH_CHANNEL_SPLIT -> {
+                    renderer.recomputeGlitchChannelSplit()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_GLITCH_PIXEL_SORT -> {
+                    renderer.recomputeGlitchPixelSort()
                     throttledForceReloadCurrentArtwork()
                 }
                 Prefs.PREF_EFFECT_MODE -> {

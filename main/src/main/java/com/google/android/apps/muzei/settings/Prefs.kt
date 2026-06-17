@@ -68,6 +68,12 @@ object Prefs {
     const val MOSAIC_SHAPE_MIXED3 = "mixed3"
     const val MOSAIC_SHAPE_MIXED4 = "mixed4"
     const val MOSAIC_SHAPE_GLITCH = "glitch"
+    const val PREF_GLITCH_DISPLACEMENT = "glitch_displacement"
+    const val PREF_LOCK_GLITCH_DISPLACEMENT = "lock_glitch_displacement"
+    const val PREF_GLITCH_CHANNEL_SPLIT = "glitch_channel_split"
+    const val PREF_LOCK_GLITCH_CHANNEL_SPLIT = "lock_glitch_channel_split"
+    const val PREF_GLITCH_PIXEL_SORT = "glitch_pixel_sort"
+    const val PREF_LOCK_GLITCH_PIXEL_SORT = "lock_glitch_pixel_sort"
     const val PREF_LINK_EFFECTS = "link_effects"
     private const val PREF_DISABLE_BLUR_WHEN_LOCKED = "disable_blur_when_screen_locked_enabled"
 

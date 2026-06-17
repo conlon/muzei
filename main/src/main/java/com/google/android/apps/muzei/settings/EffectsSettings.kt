@@ -147,6 +147,12 @@ fun EffectsSettings(
                 else Prefs.PREF_LOCK_MOSAIC_OPACITY
             val mosaicShapePref = if (page == 0) Prefs.PREF_MOSAIC_SHAPE
                 else Prefs.PREF_LOCK_MOSAIC_SHAPE
+            val glitchDisplacementPref = if (page == 0) Prefs.PREF_GLITCH_DISPLACEMENT
+                else Prefs.PREF_LOCK_GLITCH_DISPLACEMENT
+            val glitchChannelSplitPref = if (page == 0) Prefs.PREF_GLITCH_CHANNEL_SPLIT
+                else Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT
+            val glitchPixelSortPref = if (page == 0) Prefs.PREF_GLITCH_PIXEL_SORT
+                else Prefs.PREF_LOCK_GLITCH_PIXEL_SORT
             EffectsScreen(
                 prefs = prefs,
                 blurPref = blurPref,
@@ -156,6 +162,9 @@ fun EffectsSettings(
                 mosaicPref = mosaicPref,
                 mosaicOpacityPref = mosaicOpacityPref,
                 mosaicShapePref = mosaicShapePref,
+                glitchDisplacementPref = glitchDisplacementPref,
+                glitchChannelSplitPref = glitchChannelSplitPref,
+                glitchPixelSortPref = glitchPixelSortPref,
                 parallaxPref = parallaxPref,
                 showAutoFraming = page == 0,
                 showFavoriteBoost = page == 0,
@@ -319,6 +328,72 @@ private fun EffectsSettingsActions(
             }
             launch {
                 prefs.callbackFlow(
+                    Prefs.PREF_GLITCH_DISPLACEMENT,
+                    MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit { putInt(Prefs.PREF_LOCK_GLITCH_DISPLACEMENT, newValue) }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_GLITCH_DISPLACEMENT,
+                    MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit { putInt(Prefs.PREF_GLITCH_DISPLACEMENT, newValue) }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_GLITCH_CHANNEL_SPLIT,
+                    MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit { putInt(Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT, newValue) }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT,
+                    MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit { putInt(Prefs.PREF_GLITCH_CHANNEL_SPLIT, newValue) }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_GLITCH_PIXEL_SORT,
+                    MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit { putInt(Prefs.PREF_LOCK_GLITCH_PIXEL_SORT, newValue) }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
+                    Prefs.PREF_LOCK_GLITCH_PIXEL_SORT,
+                    MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT,
+                    getValue = { prefs, prefName, defaultValue ->
+                        prefs.getInt(prefName, defaultValue)
+                    }
+                ).collect { newValue ->
+                    prefs.edit { putInt(Prefs.PREF_GLITCH_PIXEL_SORT, newValue) }
+                }
+            }
+            launch {
+                prefs.callbackFlow(
                     Prefs.PREF_EFFECT_MODE,
                     MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
                     getValue = { prefs, prefName, defaultValue ->
@@ -421,6 +496,27 @@ private fun EffectsSettingsActions(
                             MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
                         )
                     )
+                    putInt(
+                        Prefs.PREF_LOCK_GLITCH_DISPLACEMENT,
+                        prefs.getInt(
+                            Prefs.PREF_GLITCH_DISPLACEMENT,
+                            MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT,
+                        prefs.getInt(
+                            Prefs.PREF_GLITCH_CHANNEL_SPLIT,
+                            MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_GLITCH_PIXEL_SORT,
+                        prefs.getInt(
+                            Prefs.PREF_GLITCH_PIXEL_SORT,
+                            MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT
+                        )
+                    )
                     putString(
                         Prefs.PREF_LOCK_EFFECT_MODE,
                         prefs.getString(
@@ -472,6 +568,27 @@ private fun EffectsSettingsActions(
                         prefs.getInt(
                             Prefs.PREF_LOCK_MOSAIC_OPACITY,
                             MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_GLITCH_DISPLACEMENT,
+                        prefs.getInt(
+                            Prefs.PREF_LOCK_GLITCH_DISPLACEMENT,
+                            MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_GLITCH_CHANNEL_SPLIT,
+                        prefs.getInt(
+                            Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT,
+                            MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT
+                        )
+                    )
+                    putInt(
+                        Prefs.PREF_GLITCH_PIXEL_SORT,
+                        prefs.getInt(
+                            Prefs.PREF_LOCK_GLITCH_PIXEL_SORT,
+                            MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT
                         )
                     )
                     putString(
@@ -574,6 +691,30 @@ private fun EffectsSettingsActions(
                     putInt(
                         Prefs.PREF_LOCK_MOSAIC_OPACITY,
                         MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY
+                    )
+                    putInt(
+                        Prefs.PREF_GLITCH_DISPLACEMENT,
+                        MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_GLITCH_DISPLACEMENT,
+                        MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT
+                    )
+                    putInt(
+                        Prefs.PREF_GLITCH_CHANNEL_SPLIT,
+                        MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT,
+                        MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT
+                    )
+                    putInt(
+                        Prefs.PREF_GLITCH_PIXEL_SORT,
+                        MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT
+                    )
+                    putInt(
+                        Prefs.PREF_LOCK_GLITCH_PIXEL_SORT,
+                        MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT
                     )
                     putString(
                         Prefs.PREF_EFFECT_MODE,

@@ -39,6 +39,9 @@
     <string name="settings_mosaic_shape_mixed3">Mixed 3</string>
     <string name="settings_mosaic_shape_mixed4">Mixed 4</string>
     <string name="settings_mosaic_shape_glitch">Glitch</string>
+    <string name="settings_glitch_displacement_title">Displacement</string>
+    <string name="settings_glitch_channel_split_title">Channel split</string>
+    <string name="settings_glitch_pixel_sort_title">Pixel sorting</string>
 
     <string name="action_favorite">Favorite</string>
     <string name="action_unfavorite">Unfavorite</string>
