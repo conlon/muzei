@@ -241,6 +241,7 @@ class MuzeiBlurRenderer(
             Prefs.MOSAIC_SHAPE_MIXED2 -> MosaicShape.MIXED2
             Prefs.MOSAIC_SHAPE_MIXED3 -> MosaicShape.MIXED3
             Prefs.MOSAIC_SHAPE_MIXED4 -> MosaicShape.MIXED4
+            Prefs.MOSAIC_SHAPE_GLITCH -> MosaicShape.GLITCH
             else -> MosaicShape.SQUARE
         }
     }
