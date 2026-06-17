@@ -240,11 +240,23 @@ private fun hexagonMosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed1: sparse recursive square subdivision. Driven by an avalanche hash so
- * each cell's decision is independent of its neighbours (no checkerboard artifact).
- * 25% of cells subdivide into 2×2 or 3×3; within those, 25% of sub-squares split
- * once more into 2×2. Most cells (75%) stay whole.
+ * Mixed1: edge-aware sparse recursive square subdivision. Subdivision is gated on
+ * local image smoothness — cells whose luminance gradient is below [EDGE_THRESHOLD]
+ * (i.e. flat, low-detail areas) may subdivide; cells crossing an edge stay as a
+ * single whole tile. This concentrates the glitch-art recursive blocks in smooth
+ * regions and leaves edges crisp, enhancing the glitch-art look.
+ *
+ * Edge detection uses a cheap coarse pass: the source is downscaled to the cell grid
+ * once (one bilinear-filtered scale), and each cell's gradient magnitude is the max
+ * absolute luminance difference to its 4 neighbours. No per-pixel work on the full
+ * image. Within the subdivision gate, all hash-driven 2×2 / 3×3 / secondary-split
+ * decisions are unchanged from the non-edge-aware variant.
+ *
+ * [EDGE_THRESHOLD] ∈ [0,1]: lower → only flattest cells subdivide (more crisp edges,
+ * fewer blocks); higher → more cells subdivide (closer to the non-edge-aware version).
  */
+private const val EDGE_THRESHOLD = 0.12f
+
 private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
     val sampler = PixelSampler(source)
     val (out, canvas) = newCanvasBitmap(source)
@@ -259,12 +271,41 @@ private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
     val numCols = ceil(sW.toFloat() / tile).toInt() + 1
     val numRows = ceil(sH.toFloat() / tile).toInt() + 1
 
+    // --- Coarse edge map ---
+    // Downscale to the cell grid (+2 border cells for neighbour lookup at the edges).
+    val mapW = numCols + 2
+    val mapH = numRows + 2
+    val thumb = source.scale(mapW, mapH, filter = true)
+    val thumbPx = IntArray(mapW * mapH).also { thumb.getPixels(it, 0, mapW, 0, 0, mapW, mapH) }
+    if (thumb != source) thumb.recycle()
+
+    // Luminance Y = 0.299R + 0.587G + 0.114B, normalised to [0,1].
+    fun lum(argb: Int): Float {
+        val r = (argb shr 16 and 0xFF) / 255f
+        val g = (argb shr 8  and 0xFF) / 255f
+        val b = (argb        and 0xFF) / 255f
+        return 0.299f * r + 0.587f * g + 0.114f * b
+    }
+    // Gradient magnitude for cell (col,row): offset by +1 because thumb has a 1-cell border.
+    fun edgeMag(col: Int, row: Int): Float {
+        val ci = (col + 1).coerceIn(0, mapW - 1)
+        val ri = (row + 1).coerceIn(0, mapH - 1)
+        val centre = lum(thumbPx[ri * mapW + ci])
+        val dxL = if (ci > 0)       kotlin.math.abs(centre - lum(thumbPx[ri * mapW + ci - 1])) else 0f
+        val dxR = if (ci < mapW-1)  kotlin.math.abs(centre - lum(thumbPx[ri * mapW + ci + 1])) else 0f
+        val dyU = if (ri > 0)       kotlin.math.abs(centre - lum(thumbPx[(ri-1) * mapW + ci])) else 0f
+        val dyD = if (ri < mapH-1)  kotlin.math.abs(centre - lum(thumbPx[(ri+1) * mapW + ci])) else 0f
+        return maxOf(dxL, dxR, dyU, dyD)
+    }
+
     for (row in -1..numRows) {
         for (col in -1..numCols) {
             val x0 = col * tileF
             val y0 = row * tileF
-            // 25% chance to subdivide (salt 0).
-            if (hashUnit(col, row, 0) >= 0.25f) {
+            // Only flat (low-edge) cells may subdivide; edge cells stay whole.
+            val isFlat = edgeMag(col, row) < EDGE_THRESHOLD
+            // 25% chance to subdivide (salt 0) — only when flat.
+            if (!isFlat || hashUnit(col, row, 0) >= 0.25f) {
                 paint.color = sampler.sample(x0 + tileF / 2f, y0 + tileF / 2f)
                 canvas.drawRect(x0, y0, x0 + tileF, y0 + tileF, paint)
                 continue
