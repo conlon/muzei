@@ -67,6 +67,7 @@ object Prefs {
     const val MOSAIC_SHAPE_MIXED2 = "mixed2"
     const val MOSAIC_SHAPE_MIXED3 = "mixed3"
     const val MOSAIC_SHAPE_MIXED4 = "mixed4"
+    const val MOSAIC_SHAPE_GLITCH = "glitch"
     const val PREF_LINK_EFFECTS = "link_effects"
     private const val PREF_DISABLE_BLUR_WHEN_LOCKED = "disable_blur_when_screen_locked_enabled"
 

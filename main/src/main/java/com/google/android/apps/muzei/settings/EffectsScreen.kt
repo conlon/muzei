@@ -299,6 +299,7 @@ private fun MosaicShapeSelector(
         Prefs.MOSAIC_SHAPE_MIXED1 to R.string.settings_mosaic_shape_mixed1,
         Prefs.MOSAIC_SHAPE_MIXED3 to R.string.settings_mosaic_shape_mixed3,
         Prefs.MOSAIC_SHAPE_MIXED4 to R.string.settings_mosaic_shape_mixed4,
+        Prefs.MOSAIC_SHAPE_GLITCH to R.string.settings_mosaic_shape_glitch,
     )
 
     @Composable

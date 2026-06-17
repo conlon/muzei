@@ -30,7 +30,7 @@ import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class MosaicShape { SQUARE, TRIANGLE, HEXAGON, MIXED1, MIXED2, MIXED3, MIXED4 }
+enum class MosaicShape { SQUARE, TRIANGLE, HEXAGON, MIXED1, MIXED2, MIXED3, MIXED4, GLITCH }
 
 /**
  * Produce a mosaic of [source] using tiles of [shape], each roughly [tileSizePx] pixels
@@ -58,6 +58,7 @@ fun mosaicBitmap(
         MosaicShape.MIXED2 -> mixed2Mosaic(source, tile)
         MosaicShape.MIXED3 -> mixed3Mosaic(source, tile)
         MosaicShape.MIXED4 -> mixed4Mosaic(source, tile)
+        MosaicShape.GLITCH -> glitchMosaic(source, tile)
     }
 }
 
@@ -462,5 +463,234 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
             drawTri(v10x, y0, v11x, y1, v01x, y1, 0, hashInt(i, j, 101))
         }
     }
+    return out
+}
+
+/**
+ * Glitch: datamosh variation of Mixed1's recursive-block subdivision. After rendering
+ * the base recursive blocks (all cells, no edge gate), three glitch passes are applied
+ * in sequence on a flat IntArray pixel buffer (no boxing — avoids GC spikes):
+ *
+ *   1. Horizontal band displacement — long bands (block shifts) and short ones (scanline
+ *      tears), with wrap-around and occasional frozen rows (sync-error streaks).
+ *   2. Pixel sorting — ~15% of rows get a contiguous run sorted by luminance, producing
+ *      melted gradient streaks.
+ *   3. RGB channel split — R and B channels sampled from laterally offset x positions to
+ *      produce chromatic aberration, amplified in random horizontal bands.
+ *
+ * All randomness uses the avalanche hash (mix32/hashInt/hashUnit) with salts 10–15 so
+ * glitch patterns are deterministic per image and independent of tile size.
+ */
+private fun glitchMosaic(source: Bitmap, tile: Int): Bitmap {
+    // ---- Tunable constants -----------------------------------------------
+    /** Fraction of displacement bands that hold zero offset (left as rendered). */
+    val ZERO_BAND_FRAC  = 0.35f
+    /** Maximum displacement as a fraction of image width. */
+    val DISP_MAX_FRAC   = 0.25f
+    /** Fraction of displacement bands that are long block shifts (vs short tears). */
+    val BLOCK_BAND_FRAC = 0.40f
+    /** Block-shift run length range (in multiples of tile height). */
+    val BLOCK_MIN_TILES = 1; val BLOCK_MAX_TILES = 3
+    /** Scanline-tear run length range (rows). */
+    val TEAR_MIN_ROWS   = 1; val TEAR_MAX_ROWS   = 4
+    /** Per-row probability of a "frozen" (repeat-previous-row) sync-error glitch. */
+    val FROZEN_ROW_FRAC = 0.03f
+    /** Fraction of rows that receive pixel sorting. */
+    val SORT_ROW_FRAC   = 0.15f
+    /** Maximum pixel-sort run as a fraction of image width (capped at 1/3). */
+    val SORT_MAX_FRAC   = 0.30f
+    /** Base chromatic-aberration shift (pixels) applied to every pixel. */
+    val CA_BASE         = 2
+    /** Max additional shift (pixels) inside amplified CA bands. */
+    val CA_BAND_EXTRA   = 6
+    // -----------------------------------------------------------------------
+
+    val sW = source.width
+    val sH = source.height
+
+    // ------------------------------------------------------------------
+    // Stage 1: Render the recursive-block base — same structure as
+    // mixed1Mosaic but without the edge-aware gate so the whole frame
+    // is busy. Salts 10, 11, 12.
+    // ------------------------------------------------------------------
+    val (out, canvas) = newCanvasBitmap(source)
+    val sampler = PixelSampler(source)
+    val paint = Paint().apply {
+        isAntiAlias = false
+        isDither = false
+        style = Paint.Style.FILL
+    }
+    val tileF = tile.toFloat()
+    val numCols = ceil(sW.toFloat() / tile).toInt() + 1
+    val numRows = ceil(sH.toFloat() / tile).toInt() + 1
+    for (row in -1..numRows) {
+        for (col in -1..numCols) {
+            val x0 = col * tileF
+            val y0 = row * tileF
+            // 25% chance to stay whole (salt 10).
+            if (hashUnit(col, row, 10) >= 0.25f) {
+                paint.color = sampler.sample(x0 + tileF / 2f, y0 + tileF / 2f)
+                canvas.drawRect(x0, y0, x0 + tileF, y0 + tileF, paint)
+                continue
+            }
+            // Subdivide into 2×2 or 3×3 (salt 11).
+            val n = if (hashUnit(col, row, 11) < 0.5f) 2 else 3
+            val subW = tileF / n
+            val subH = tileF / n
+            for (sr in 0 until n) {
+                for (sc in 0 until n) {
+                    val sx0 = x0 + sc * subW
+                    val sy0 = y0 + sr * subH
+                    // 25% chance to split sub-square into 2×2 (salt 12).
+                    if (hashUnit(col * 4 + sc, row * 4 + sr, 12) < 0.25f) {
+                        val ssW = subW / 2f
+                        val ssH = subH / 2f
+                        for (ssr in 0..1) {
+                            for (ssc in 0..1) {
+                                val ssx0 = sx0 + ssc * ssW
+                                val ssy0 = sy0 + ssr * ssH
+                                paint.color = sampler.sample(ssx0 + ssW / 2f, ssy0 + ssH / 2f)
+                                canvas.drawRect(ssx0, ssy0, ssx0 + ssW, ssy0 + ssH, paint)
+                            }
+                        }
+                    } else {
+                        paint.color = sampler.sample(sx0 + subW / 2f, sy0 + subH / 2f)
+                        canvas.drawRect(sx0, sy0, sx0 + subW, sy0 + subH, paint)
+                    }
+                }
+            }
+        }
+    }
+
+    // Flatten the rendered bitmap into a primitive pixel array for the remaining passes.
+    val buf = IntArray(sW * sH)
+    out.getPixels(buf, 0, sW, 0, 0, sW, sH)
+
+    // ------------------------------------------------------------------
+    // Stage 2: Horizontal band displacement. Each band holds a fixed x-offset
+    // (content wraps around) for a run of rows. Long runs → block shifts;
+    // short runs → scanline tears. Occasional rows repeat the previous row
+    // (sync-error freeze). Salt 13.
+    // ------------------------------------------------------------------
+    val rowTmp  = IntArray(sW)
+    val prevRow = IntArray(sW)
+    var hasPrev = false
+    var runLeft = 0
+    var curOffset = 0
+
+    for (y in 0 until sH) {
+        if (runLeft <= 0) {
+            // Roll a new band keyed on this row index.
+            val h0 = hashUnit(y, 0, 13)   // zero-band gate
+            val h1 = hashUnit(y, 1, 13)   // block vs tear
+            val h2 = hashUnit(y, 2, 13)   // run-length fraction
+            val h3 = hashUnit(y, 3, 13)   // offset magnitude
+            val h4 = hashUnit(y, 4, 13)   // offset sign
+            val isBlock = h1 < BLOCK_BAND_FRAC
+            runLeft = if (isBlock) {
+                ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile)
+                    .coerceAtLeast(1)
+            } else {
+                (TEAR_MIN_ROWS + (h2 * (TEAR_MAX_ROWS - TEAR_MIN_ROWS + 1)).toInt())
+                    .coerceAtLeast(1)
+            }
+            curOffset = if (h0 < ZERO_BAND_FRAC) {
+                0
+            } else {
+                val mag = (h3 * DISP_MAX_FRAC * sW).toInt()
+                if (h4 < 0.5f) mag else -mag
+            }
+        }
+        runLeft--
+
+        val rowStart = y * sW
+        // Frozen row: repeat the previous row unchanged (sync-error streak).
+        val isFrozen = hasPrev && hashUnit(y, 5, 13) < FROZEN_ROW_FRAC
+        if (isFrozen) {
+            System.arraycopy(prevRow, 0, buf, rowStart, sW)
+        } else if (curOffset != 0) {
+            // Shift this row's content left by `off` pixels, wrapping around.
+            System.arraycopy(buf, rowStart, rowTmp, 0, sW)
+            val off = ((curOffset % sW) + sW) % sW  // normalise to [0, sW)
+            System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
+            System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
+        }
+        // Save this row as the freeze candidate for the next row.
+        System.arraycopy(buf, rowStart, prevRow, 0, sW)
+        hasPrev = true
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 3: Pixel sorting. A sparse subset of rows get one contiguous
+    // run sorted by luminance to produce melted gradient streaks.
+    // Encoding: (lum xor 0x80) in bits 31–24 maps the range 0..255 onto a
+    // monotonically increasing signed integer so IntArray.sort() gives
+    // ascending luminance order; position stored in bits 23–0. Salt 14.
+    // ------------------------------------------------------------------
+    val maxRun  = (sW * SORT_MAX_FRAC).toInt().coerceAtLeast(2)
+    val sortKey = IntArray(maxRun)
+    val sortPix = IntArray(maxRun)
+
+    for (y in 0 until sH) {
+        if (hashUnit(y, 0, 14) >= SORT_ROW_FRAC) continue
+        val h1     = hashUnit(y, 1, 14)
+        val h2     = hashUnit(y, 2, 14)
+        val runLen = (h1 * maxRun).toInt().coerceIn(2, maxRun)
+        val start  = (h2 * (sW - runLen)).toInt().coerceIn(0, sW - runLen)
+        val base   = y * sW + start
+        for (i in 0 until runLen) {
+            val px  = buf[base + i]
+            val r   = (px shr 16) and 0xFF
+            val g   = (px shr 8)  and 0xFF
+            val b   = px and 0xFF
+            val lum = (r * 77 + g * 150 + b * 29) ushr 8   // integer luma 0..255
+            sortPix[i] = px
+            sortKey[i] = ((lum xor 0x80) shl 24) or i      // ascending signed sort ↔ ascending lum
+        }
+        sortKey.sort(0, runLen)
+        for (d in 0 until runLen) {
+            buf[base + d] = sortPix[sortKey[d] and 0x00FFFFFF]
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 4: RGB channel split (chromatic aberration). R is sampled from
+    // x−dR, B from x+dB; G stays at x. A small base shift everywhere,
+    // amplified inside random horizontal bands. Salt 15.
+    // ------------------------------------------------------------------
+    val out2   = IntArray(sW * sH)
+    var caLeft = 0
+    var caDr   = CA_BASE
+    var caDb   = CA_BASE
+
+    for (y in 0 until sH) {
+        if (caLeft <= 0) {
+            val h0 = hashUnit(y, 0, 15)   // band-length fraction
+            val h1 = hashUnit(y, 1, 15)   // extra CA strength
+            val h2 = hashUnit(y, 2, 15)   // amplified vs base gate
+            caLeft = (1 + (h0 * tile * 3f).toInt()).coerceAtLeast(1)
+            val extra = (h1 * CA_BAND_EXTRA).toInt()
+            if (h2 < 0.30f) {
+                caDr = CA_BASE; caDb = CA_BASE       // not amplified
+            } else {
+                caDr = CA_BASE + extra; caDb = CA_BASE + extra
+            }
+        }
+        caLeft--
+        val rowStart = y * sW
+        for (x in 0 until sW) {
+            val xR = (x - caDr).coerceIn(0, sW - 1)
+            val xB = (x + caDb).coerceIn(0, sW - 1)
+            val pr = buf[rowStart + xR]
+            val pg = buf[rowStart + x]
+            val pb = buf[rowStart + xB]
+            out2[rowStart + x] = 0xFF000000.toInt() or
+                    (pr and 0x00FF0000) or
+                    (pg and 0x0000FF00) or
+                    (pb and 0x000000FF)
+        }
+    }
+
+    out.setPixels(out2, 0, sW, 0, 0, sW, sH)
     return out
 }
