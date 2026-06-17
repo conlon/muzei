@@ -287,36 +287,44 @@ private fun MosaicShapeSelector(
     onShapeChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val options = listOf(
+    // Basic shapes (row 1) and experimental/mixed shapes (row 2, with "Circles").
+    val basicOptions = listOf(
         Prefs.MOSAIC_SHAPE_SQUARE to R.string.settings_mosaic_shape_square,
         Prefs.MOSAIC_SHAPE_TRIANGLE to R.string.settings_mosaic_shape_triangle,
         Prefs.MOSAIC_SHAPE_HEXAGON to R.string.settings_mosaic_shape_hexagon,
         Prefs.MOSAIC_SHAPE_RANDOM to R.string.settings_mosaic_shape_random,
+    )
+    val experimentalOptions = listOf(
+        Prefs.MOSAIC_SHAPE_MIXED2 to R.string.settings_mosaic_shape_mixed2,  // "Circles"
         Prefs.MOSAIC_SHAPE_MIXED1 to R.string.settings_mosaic_shape_mixed1,
-        Prefs.MOSAIC_SHAPE_MIXED2 to R.string.settings_mosaic_shape_mixed2,
         Prefs.MOSAIC_SHAPE_MIXED3 to R.string.settings_mosaic_shape_mixed3,
         Prefs.MOSAIC_SHAPE_MIXED4 to R.string.settings_mosaic_shape_mixed4,
     )
-    FlowRow(modifier = modifier) {
-        options.forEach { (value, label) ->
-            FilterChip(
+
+    @Composable
+    fun ShapeChip(value: String, label: Int) {
+        FilterChip(
+            selected = shape == value,
+            onClick = { onShapeChange(value) },
+            label = { Text(text = stringResource(label)) },
+            colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color.Transparent,
+                labelColor = Color.White,
+                selectedContainerColor = Color.White.copy(alpha = 0.18f),
+                selectedLabelColor = Color.White,
+            ),
+            border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
                 selected = shape == value,
-                onClick = { onShapeChange(value) },
-                label = { Text(text = stringResource(label)) },
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color.Transparent,
-                    labelColor = Color.White,
-                    selectedContainerColor = Color.White.copy(alpha = 0.18f),
-                    selectedLabelColor = Color.White,
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = shape == value,
-                    borderColor = Color.White.copy(alpha = 0.5f),
-                    selectedBorderColor = Color.White,
-                ),
-            )
-        }
+                borderColor = Color.White.copy(alpha = 0.5f),
+                selectedBorderColor = Color.White,
+            ),
+        )
+    }
+
+    Column(modifier = modifier) {
+        FlowRow { basicOptions.forEach { (v, l) -> ShapeChip(v, l) } }
+        FlowRow { experimentalOptions.forEach { (v, l) -> ShapeChip(v, l) } }
     }
 }
 

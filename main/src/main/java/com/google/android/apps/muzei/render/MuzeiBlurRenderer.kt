@@ -47,6 +47,7 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -718,7 +719,13 @@ class MuzeiBlurRenderer(
                     val compositeCanvas = Canvas(composite)
                     compositeCanvas.drawBitmap(scaledBitmap, 0f, 0f, null)
                     val alphaPaint = Paint().apply {
-                        alpha = (mosaicOpacity / 500f * 255).toInt().coerceIn(0, 255)
+                        // Logarithmic response: ln(1+k·x)/ln(1+k), x∈[0,1].
+                        // Concave curve — low slider positions already produce visible
+                        // mosaic; the top of the range fine-tunes toward full opacity.
+                        val x = mosaicOpacity / 500f
+                        val k = 9f
+                        val frac = ln(1f + k * x) / ln(1f + k)
+                        alpha = (frac * 255).toInt().coerceIn(0, 255)
                     }
                     compositeCanvas.drawBitmap(pixelated, 0f, 0f, alphaPaint)
                     pixelated.recycle()

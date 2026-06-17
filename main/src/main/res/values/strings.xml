@@ -35,7 +35,7 @@
     <string name="settings_mosaic_shape_hexagon">Hexagon</string>
     <string name="settings_mosaic_shape_random">Random</string>
     <string name="settings_mosaic_shape_mixed1">Mixed 1</string>
-    <string name="settings_mosaic_shape_mixed2">Mixed 2</string>
+    <string name="settings_mosaic_shape_mixed2">Circles</string>
     <string name="settings_mosaic_shape_mixed3">Mixed 3</string>
     <string name="settings_mosaic_shape_mixed4">Mixed 4</string>
 
