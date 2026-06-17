@@ -81,7 +81,8 @@ class MuzeiBlurRenderer(
         const val DEFAULT_MAX_DIM = 128 // technical max 255
         const val DEFAULT_MOSAIC = 100 // max 500
         const val DEFAULT_MOSAIC_OPACITY = 500 // max 500; 500 = full mosaic (preserves existing look)
-        const val DEFAULT_GLITCH_DISPLACEMENT = 250  // max 500
+        const val DEFAULT_GLITCH_H_DISPLACEMENT = 250  // max 500
+        const val DEFAULT_GLITCH_V_DISPLACEMENT = 250  // max 500
         const val DEFAULT_GLITCH_CHANNEL_SPLIT = 250 // max 500
         const val DEFAULT_GLITCH_PIXEL_SORT = 250    // max 500
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
@@ -103,7 +104,8 @@ class MuzeiBlurRenderer(
     private var maxGrey: Int = 0
     private var mosaicAmount: Int = DEFAULT_MOSAIC
     private var mosaicOpacity: Int = DEFAULT_MOSAIC_OPACITY
-    private var glitchDisplacement: Int = DEFAULT_GLITCH_DISPLACEMENT
+    private var glitchHDisplacement: Int = DEFAULT_GLITCH_H_DISPLACEMENT
+    private var glitchVDisplacement: Int = DEFAULT_GLITCH_V_DISPLACEMENT
     private var glitchChannelSplit: Int = DEFAULT_GLITCH_CHANNEL_SPLIT
     private var glitchPixelSort: Int = DEFAULT_GLITCH_PIXEL_SORT
     private var currentEffectMode: String = DEFAULT_EFFECT_MODE
@@ -141,7 +143,8 @@ class MuzeiBlurRenderer(
     private var greyPreferenceName = Prefs.PREF_GREY_AMOUNT
     private var mosaicPreferenceName = Prefs.PREF_MOSAIC_AMOUNT
     private var mosaicOpacityPreferenceName = Prefs.PREF_MOSAIC_OPACITY
-    private var glitchDisplacementPreferenceName = Prefs.PREF_GLITCH_DISPLACEMENT
+    private var glitchHDisplacementPreferenceName = Prefs.PREF_GLITCH_H_DISPLACEMENT
+    private var glitchVDisplacementPreferenceName = Prefs.PREF_GLITCH_V_DISPLACEMENT
     private var glitchChannelSplitPreferenceName = Prefs.PREF_GLITCH_CHANNEL_SPLIT
     private var glitchPixelSortPreferenceName = Prefs.PREF_GLITCH_PIXEL_SORT
     private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
@@ -165,7 +168,8 @@ class MuzeiBlurRenderer(
         recomputeGreyAmount()
         recomputeMosaicAmount()
         recomputeMosaicOpacity()
-        recomputeGlitchDisplacement()
+        recomputeGlitchHDisplacement()
+        recomputeGlitchVDisplacement()
         recomputeGlitchChannelSplit()
         recomputeGlitchPixelSort()
         recomputeEffectMode()
@@ -229,12 +233,21 @@ class MuzeiBlurRenderer(
                 .coerceIn(0, 500)
     }
 
-    fun recomputeGlitchDisplacement(
-            newGlitchDisplacementPreferenceName: String = glitchDisplacementPreferenceName
+    fun recomputeGlitchHDisplacement(
+            newGlitchHDisplacementPreferenceName: String = glitchHDisplacementPreferenceName
     ) {
-        glitchDisplacementPreferenceName = newGlitchDisplacementPreferenceName
-        glitchDisplacement = Prefs.getSharedPreferences(context)
-                .getInt(glitchDisplacementPreferenceName, DEFAULT_GLITCH_DISPLACEMENT)
+        glitchHDisplacementPreferenceName = newGlitchHDisplacementPreferenceName
+        glitchHDisplacement = Prefs.getSharedPreferences(context)
+                .getInt(glitchHDisplacementPreferenceName, DEFAULT_GLITCH_H_DISPLACEMENT)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchVDisplacement(
+            newGlitchVDisplacementPreferenceName: String = glitchVDisplacementPreferenceName
+    ) {
+        glitchVDisplacementPreferenceName = newGlitchVDisplacementPreferenceName
+        glitchVDisplacement = Prefs.getSharedPreferences(context)
+                .getInt(glitchVDisplacementPreferenceName, DEFAULT_GLITCH_V_DISPLACEMENT)
                 .coerceIn(0, 500)
     }
 
@@ -750,7 +763,7 @@ class MuzeiBlurRenderer(
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
                 val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape,
-                        glitchDisplacement, glitchChannelSplit, glitchPixelSort)
+                        glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
 
                 // Blend the mosaic over the (original) scaled photo when opacity < 500.
                 // This respects grey (desaturate step below) and dim (draw-time overlay).
