@@ -395,71 +395,76 @@ private fun mixed3Mosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed4: sparse recursive equilateral triangle subdivision. Uses the same tessellation
- * as [triangleMosaic] but each base triangle has a 25% chance of splitting into 4
- * sub-triangles (3 corner + 1 central inverted), and each of those has a 25% chance
- * of splitting once more (depth cap 2). Most triangles stay whole; subdivision reads
- * as scattered, irregular detail.
- *
- * Split decisions are driven by [mix32] avalanche hashes of a node-local integer key
- * so adjacent triangles are uncorrelated (no checkerboard / lattice artifacts).
+ * Mixed4: translucent overlapping jittered triangle mesh. Forks [mixed3Mosaic]'s
+ * irregular lattice, then draws each triangle expanded ~40% about its centroid so
+ * adjacent triangles overlap. Triangles are drawn translucent (~50% alpha, antialiased)
+ * over a bilinear-blurred base layer, exactly like [mixed2Mosaic]'s circles.
+ * Overlapping translucent triangles blend (SRC_OVER) into combined colours — a soft
+ * "colour blur" at every intersection.
  */
 private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
-    val sampler = PixelSampler(source)
+    val tileF = tile.toFloat()
+    val sW = source.width; val sH = source.height
+    val sWf = sW.toFloat(); val sHf = sH.toFloat()
+    val rowH = tile * sqrt(3f) / 2f
+
+    // Base layer: smooth blur via bilinear downscale then upscale (same as mixed2Mosaic).
+    val baseW = max(1, sW / tile); val baseH = max(1, sH / tile)
+    val base = source.scale(baseW, baseH, filter = true)
     val (out, canvas) = newCanvasBitmap(source)
-    val paint = Paint().apply {
-        isAntiAlias = false
-        isDither = false
+    val blitPaint = Paint().apply { isFilterBitmap = true }
+    canvas.drawBitmap(base, Rect(0, 0, baseW, baseH), Rect(0, 0, sW, sH), blitPaint)
+    if (base != source) base.recycle()
+
+    val sampler = PixelSampler(source)
+    val triPaint = Paint().apply {
+        isAntiAlias = true
         style = Paint.Style.FILL
     }
     val path = Path()
-    val sW = source.width.toFloat()
-    val sH = source.height.toFloat()
-    val tileF = tile.toFloat()
-    val rowH = tile * sqrt(3f) / 2f
 
-    fun drawTri(
-        ax: Float, ay: Float,
-        bx: Float, by: Float,
-        cx: Float, cy: Float,
-        depth: Int,
-        nodeHash: Int
-    ) {
-        // 25%: top 2 bits of avalanche-mixed node hash are both 0.
-        val doSplit = depth < 2 && mix32(nodeHash) ushr 30 == 0
-        if (doSplit) {
-            val mabx = (ax + bx) / 2f; val maby = (ay + by) / 2f
-            val mbcx = (bx + cx) / 2f; val mbcy = (by + cy) / 2f
-            val mcax = (cx + ax) / 2f; val mcay = (cy + ay) / 2f
-            drawTri(ax, ay, mabx, maby, mcax, mcay, depth + 1, nodeHash * 4 + 1)
-            drawTri(mabx, maby, bx, by, mbcx, mbcy, depth + 1, nodeHash * 4 + 2)
-            drawTri(mcax, mcay, mbcx, mbcy, cx, cy, depth + 1, nodeHash * 4 + 3)
-            // Central inverted triangle.
-            drawTri(mabx, maby, mbcx, mbcy, mcax, mcay, depth + 1, nodeHash * 4 + 4)
-        } else {
-            paint.color = sampler.sample((ax + bx + cx) / 3f, (ay + by + cy) / 3f)
-            path.rewind()
-            path.moveTo(ax, ay); path.lineTo(bx, by); path.lineTo(cx, cy)
-            path.close()
-            canvas.drawPath(path, paint)
-        }
-    }
+    // Expand factor: vertices are pushed away from their centroid by this ratio so
+    // adjacent triangles overlap and blend at their edges.
+    val expand = 1.4f
 
-    val jMin = -1
-    val jMax = ceil(sH / rowH).toInt() + 1
+    // Jittered lattice vertex (salts 8/9 → independent stream from mixed3Mosaic's 6/7).
+    fun vx(i: Int, j: Int) = i * tileF + j * tileF / 2f + (hashUnit(i, j, 8) - 0.5f) * 0.6f * tileF
+    fun vy(i: Int, j: Int) = j * rowH + (hashUnit(i, j, 9) - 0.5f) * 0.6f * rowH
+
+    val jMin = -1; val jMax = ceil(sHf / rowH).toInt() + 1
     for (j in jMin..jMax) {
         val rowOffsetX = j * (tileF / 2f)
-        val y0 = j * rowH
-        val y1 = (j + 1) * rowH
-        val iMin = floor(-rowOffsetX / tileF).toInt() - 1
-        val iMax = ceil((sW - rowOffsetX) / tileF).toInt() + 1
+        val iMin = floor(-rowOffsetX / tileF).toInt() - 2
+        val iMax = ceil((sWf - rowOffsetX) / tileF).toInt() + 2
         for (i in iMin..iMax) {
-            val v00x = i * tileF + rowOffsetX
-            val v10x = v00x + tileF
-            val v01x = v00x + tileF / 2f
-            val v11x = v01x + tileF
-            drawTri(v00x, y0, v10x, y0, v01x, y1, 0, hashInt(i, j, 202))
-            drawTri(v10x, y0, v11x, y1, v01x, y1, 0, hashInt(i, j, 101))
+            // Triangle A vertices: L(i,j), L(i+1,j), L(i,j+1)
+            val a0x = vx(i, j);   val a0y = vy(i, j)
+            val a1x = vx(i+1, j); val a1y = vy(i+1, j)
+            val a2x = vx(i, j+1); val a2y = vy(i, j+1)
+            val agx = (a0x + a1x + a2x) / 3f; val agy = (a0y + a1y + a2y) / 3f
+            val rgb4a = sampler.sample(agx, agy) and 0x00FFFFFF
+            triPaint.color = (0x80 shl 24) or rgb4a
+            path.rewind()
+            // Expand each vertex away from the centroid.
+            path.moveTo(agx + expand * (a0x - agx), agy + expand * (a0y - agy))
+            path.lineTo(agx + expand * (a1x - agx), agy + expand * (a1y - agy))
+            path.lineTo(agx + expand * (a2x - agx), agy + expand * (a2y - agy))
+            path.close()
+            canvas.drawPath(path, triPaint)
+
+            // Triangle B vertices: L(i+1,j), L(i+1,j+1), L(i,j+1)
+            val b0x = vx(i+1, j);   val b0y = vy(i+1, j)
+            val b1x = vx(i+1, j+1); val b1y = vy(i+1, j+1)
+            val b2x = vx(i, j+1);   val b2y = vy(i, j+1)
+            val bgx = (b0x + b1x + b2x) / 3f; val bgy = (b0y + b1y + b2y) / 3f
+            val rgb4b = sampler.sample(bgx, bgy) and 0x00FFFFFF
+            triPaint.color = (0x80 shl 24) or rgb4b
+            path.rewind()
+            path.moveTo(bgx + expand * (b0x - bgx), bgy + expand * (b0y - bgy))
+            path.lineTo(bgx + expand * (b1x - bgx), bgy + expand * (b1y - bgy))
+            path.lineTo(bgx + expand * (b2x - bgx), bgy + expand * (b2y - bgy))
+            path.close()
+            canvas.drawPath(path, triPaint)
         }
     }
     return out
