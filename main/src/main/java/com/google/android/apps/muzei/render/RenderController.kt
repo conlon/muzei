@@ -67,8 +67,10 @@ abstract class RenderController(
                         if (value) Prefs.PREF_LOCK_MOSAIC_AMOUNT else Prefs.PREF_MOSAIC_AMOUNT)
                 renderer.recomputeMosaicOpacity(
                         if (value) Prefs.PREF_LOCK_MOSAIC_OPACITY else Prefs.PREF_MOSAIC_OPACITY)
-                renderer.recomputeGlitchDisplacement(
-                        if (value) Prefs.PREF_LOCK_GLITCH_DISPLACEMENT else Prefs.PREF_GLITCH_DISPLACEMENT)
+                renderer.recomputeGlitchHDisplacement(
+                        if (value) Prefs.PREF_LOCK_GLITCH_H_DISPLACEMENT else Prefs.PREF_GLITCH_H_DISPLACEMENT)
+                renderer.recomputeGlitchVDisplacement(
+                        if (value) Prefs.PREF_LOCK_GLITCH_V_DISPLACEMENT else Prefs.PREF_GLITCH_V_DISPLACEMENT)
                 renderer.recomputeGlitchChannelSplit(
                         if (value) Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT else Prefs.PREF_GLITCH_CHANNEL_SPLIT)
                 renderer.recomputeGlitchPixelSort(
@@ -107,8 +109,12 @@ abstract class RenderController(
                     renderer.recomputeMosaicOpacity()
                     throttledForceReloadCurrentArtwork()
                 }
-                Prefs.PREF_LOCK_GLITCH_DISPLACEMENT -> {
-                    renderer.recomputeGlitchDisplacement()
+                Prefs.PREF_LOCK_GLITCH_H_DISPLACEMENT -> {
+                    renderer.recomputeGlitchHDisplacement()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_LOCK_GLITCH_V_DISPLACEMENT -> {
+                    renderer.recomputeGlitchVDisplacement()
                     throttledForceReloadCurrentArtwork()
                 }
                 Prefs.PREF_LOCK_GLITCH_CHANNEL_SPLIT -> {
@@ -150,8 +156,12 @@ abstract class RenderController(
                     renderer.recomputeMosaicOpacity()
                     throttledForceReloadCurrentArtwork()
                 }
-                Prefs.PREF_GLITCH_DISPLACEMENT -> {
-                    renderer.recomputeGlitchDisplacement()
+                Prefs.PREF_GLITCH_H_DISPLACEMENT -> {
+                    renderer.recomputeGlitchHDisplacement()
+                    throttledForceReloadCurrentArtwork()
+                }
+                Prefs.PREF_GLITCH_V_DISPLACEMENT -> {
+                    renderer.recomputeGlitchVDisplacement()
                     throttledForceReloadCurrentArtwork()
                 }
                 Prefs.PREF_GLITCH_CHANNEL_SPLIT -> {

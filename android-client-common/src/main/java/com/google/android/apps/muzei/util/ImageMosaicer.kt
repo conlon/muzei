@@ -44,7 +44,8 @@ fun mosaicBitmap(
     source: Bitmap?,
     tileSizePx: Int,
     shape: MosaicShape = MosaicShape.SQUARE,
-    glitchDisplacement: Int = 250,
+    glitchHDisplacement: Int = 250,
+    glitchVDisplacement: Int = 250,
     glitchChannelSplit: Int = 250,
     glitchPixelSort: Int = 250,
 ): Bitmap? {
@@ -61,7 +62,7 @@ fun mosaicBitmap(
         MosaicShape.MIXED2 -> mixed2Mosaic(source, tile)
         MosaicShape.MIXED3 -> mixed3Mosaic(source, tile)
         MosaicShape.MIXED4 -> mixed4Mosaic(source, tile)
-        MosaicShape.GLITCH -> glitchMosaic(source, tile, glitchDisplacement, glitchChannelSplit, glitchPixelSort)
+        MosaicShape.GLITCH -> glitchMosaic(source, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
     }
 }
 
@@ -475,9 +476,9 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
  * flat IntArray pixel buffer (no boxing — avoids GC spikes):
  *
  *   1. Horizontal band displacement — block shifts and scanline tears, with wrap-around
- *      and occasional frozen rows (sync-error streaks). Scaled by [displacement].
+ *      and occasional frozen rows (sync-error streaks). Scaled by [hDisplacement].
  *   2. Vertical band displacement — same structure but along columns. Scaled by
- *      [displacement]. Salt 16.
+ *      [vDisplacement]. Salt 16.
  *   3. Pixel sorting — a sparse subset of rows sorted by luminance, producing melted
  *      gradient streaks. Scaled by [pixelSort]. Salt 14.
  *   4. 2-D RGB channel split (chromatic aberration) — R and B channels sampled from
@@ -490,22 +491,24 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
 private fun glitchMosaic(
     source: Bitmap,
     tile: Int,
-    displacement: Int = 250,
+    hDisplacement: Int = 250,
+    vDisplacement: Int = 250,
     channelSplit: Int = 250,
     pixelSort: Int = 250,
 ): Bitmap {
     // ---- Normalised strengths [0.0, 1.0] per technique -------------------
-    val td = displacement / 500f   // displacement (horizontal + vertical)
+    val tdH = hDisplacement / 500f // horizontal displacement
+    val tdV = vDisplacement / 500f // vertical displacement
     val tc = channelSplit / 500f   // chromatic aberration
     val ts = pixelSort / 500f      // pixel sorting
 
     // ---- Tunable constants (documented; scale with strength) -------------
     /** Fraction of displacement bands that hold zero offset. */
     val ZERO_BAND_FRAC   = 0.35f
-    /** Max horizontal displacement: fraction of image width. At td=0.5 → 0.25·sW. */
-    val DISP_H_MAX_FRAC  = td * 0.5f
-    /** Max vertical displacement: fraction of image height. At td=0.5 → 0.25·sH. */
-    val DISP_V_MAX_FRAC  = td * 0.5f
+    /** Max horizontal displacement: fraction of image width. At tdH=0.5 → 0.25·sW. */
+    val DISP_H_MAX_FRAC  = tdH * 0.5f
+    /** Max vertical displacement: fraction of image height. At tdV=0.5 → 0.25·sH. */
+    val DISP_V_MAX_FRAC  = tdV * 0.5f
     /** Fraction of displacement bands that are long block shifts (vs short tears). */
     val BLOCK_BAND_FRAC  = 0.40f
     /** Block-shift run length range (multiples of tile). */

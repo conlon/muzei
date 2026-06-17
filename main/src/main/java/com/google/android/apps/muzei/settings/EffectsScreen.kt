@@ -19,6 +19,8 @@ package com.google.android.apps.muzei.settings
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -72,7 +74,8 @@ fun EffectsScreen(
     mosaicPref: String,
     mosaicOpacityPref: String,
     mosaicShapePref: String,
-    glitchDisplacementPref: String = Prefs.PREF_GLITCH_DISPLACEMENT,
+    glitchHDisplacementPref: String = Prefs.PREF_GLITCH_H_DISPLACEMENT,
+    glitchVDisplacementPref: String = Prefs.PREF_GLITCH_V_DISPLACEMENT,
     glitchChannelSplitPref: String = Prefs.PREF_GLITCH_CHANNEL_SPLIT,
     glitchPixelSortPref: String = Prefs.PREF_GLITCH_PIXEL_SORT,
     parallaxPref: String? = null,
@@ -90,8 +93,10 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, mosaicPref, MuzeiBlurRenderer.DEFAULT_MOSAIC)
     val mosaicOpacity =
         rememberPreferenceSourcedValue(prefs, mosaicOpacityPref, MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY)
-    val glitchDisplacement =
-        rememberPreferenceSourcedValue(prefs, glitchDisplacementPref, MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT)
+    val glitchHDisplacement =
+        rememberPreferenceSourcedValue(prefs, glitchHDisplacementPref, MuzeiBlurRenderer.DEFAULT_GLITCH_H_DISPLACEMENT)
+    val glitchVDisplacement =
+        rememberPreferenceSourcedValue(prefs, glitchVDisplacementPref, MuzeiBlurRenderer.DEFAULT_GLITCH_V_DISPLACEMENT)
     val glitchChannelSplit =
         rememberPreferenceSourcedValue(prefs, glitchChannelSplitPref, MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT)
     val glitchPixelSort =
@@ -123,9 +128,12 @@ fun EffectsScreen(
         mosaicOpacity = mosaicOpacity.value,
         onMosaicOpacityChange = { mosaicOpacity.value = it },
         onMosaicOpacityChangeFinished = { mosaicOpacity.userControlled = false },
-        glitchDisplacement = glitchDisplacement.value,
-        onGlitchDisplacementChange = { glitchDisplacement.value = it },
-        onGlitchDisplacementChangeFinished = { glitchDisplacement.userControlled = false },
+        glitchHDisplacement = glitchHDisplacement.value,
+        onGlitchHDisplacementChange = { glitchHDisplacement.value = it },
+        onGlitchHDisplacementChangeFinished = { glitchHDisplacement.userControlled = false },
+        glitchVDisplacement = glitchVDisplacement.value,
+        onGlitchVDisplacementChange = { glitchVDisplacement.value = it },
+        onGlitchVDisplacementChangeFinished = { glitchVDisplacement.userControlled = false },
         glitchChannelSplit = glitchChannelSplit.value,
         onGlitchChannelSplitChange = { glitchChannelSplit.value = it },
         onGlitchChannelSplitChangeFinished = { glitchChannelSplit.userControlled = false },
@@ -165,9 +173,12 @@ fun EffectsScreen(
     mosaicOpacity: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
     onMosaicOpacityChange: (Int) -> Unit = {},
     onMosaicOpacityChangeFinished: (() -> Unit) = {},
-    glitchDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT,
-    onGlitchDisplacementChange: (Int) -> Unit = {},
-    onGlitchDisplacementChangeFinished: (() -> Unit) = {},
+    glitchHDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_H_DISPLACEMENT,
+    onGlitchHDisplacementChange: (Int) -> Unit = {},
+    onGlitchHDisplacementChangeFinished: (() -> Unit) = {},
+    glitchVDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_V_DISPLACEMENT,
+    onGlitchVDisplacementChange: (Int) -> Unit = {},
+    onGlitchVDisplacementChangeFinished: (() -> Unit) = {},
     glitchChannelSplit: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT,
     onGlitchChannelSplitChange: (Int) -> Unit = {},
     onGlitchChannelSplitChangeFinished: (() -> Unit) = {},
@@ -204,8 +215,8 @@ fun EffectsScreen(
     val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
     val showAutoFraming = autoFramingEnabled != null && onAutoFramingChange != null
     Column(
-        modifier = modifier,
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+        modifier = modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         EffectModeSelector(
@@ -237,9 +248,12 @@ fun EffectsScreen(
             mosaicOpacity = mosaicOpacity,
             onMosaicOpacityChange = onMosaicOpacityChange,
             onMosaicOpacityChangeFinished = onMosaicOpacityChangeFinished,
-            glitchDisplacement = glitchDisplacement,
-            onGlitchDisplacementChange = onGlitchDisplacementChange,
-            onGlitchDisplacementChangeFinished = onGlitchDisplacementChangeFinished,
+            glitchHDisplacement = glitchHDisplacement,
+            onGlitchHDisplacementChange = onGlitchHDisplacementChange,
+            onGlitchHDisplacementChangeFinished = onGlitchHDisplacementChangeFinished,
+            glitchVDisplacement = glitchVDisplacement,
+            onGlitchVDisplacementChange = onGlitchVDisplacementChange,
+            onGlitchVDisplacementChangeFinished = onGlitchVDisplacementChangeFinished,
             glitchChannelSplit = glitchChannelSplit,
             onGlitchChannelSplitChange = onGlitchChannelSplitChange,
             onGlitchChannelSplitChangeFinished = onGlitchChannelSplitChangeFinished,
@@ -380,9 +394,12 @@ private fun EffectsGrid(
     mosaicOpacity: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
     onMosaicOpacityChange: (Int) -> Unit = {},
     onMosaicOpacityChangeFinished: (() -> Unit) = {},
-    glitchDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT,
-    onGlitchDisplacementChange: (Int) -> Unit = {},
-    onGlitchDisplacementChangeFinished: (() -> Unit) = {},
+    glitchHDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_H_DISPLACEMENT,
+    onGlitchHDisplacementChange: (Int) -> Unit = {},
+    onGlitchHDisplacementChangeFinished: (() -> Unit) = {},
+    glitchVDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_V_DISPLACEMENT,
+    onGlitchVDisplacementChange: (Int) -> Unit = {},
+    onGlitchVDisplacementChangeFinished: (() -> Unit) = {},
     glitchChannelSplit: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT,
     onGlitchChannelSplitChange: (Int) -> Unit = {},
     onGlitchChannelSplitChangeFinished: (() -> Unit) = {},
@@ -411,7 +428,7 @@ private fun EffectsGrid(
     val isGlitch = isMosaic && mosaicShape == Prefs.MOSAIC_SHAPE_GLITCH
     val showParallax = parallax != null && onParallaxChange != null
     val showFavoriteBoost = favoriteBoost != null && onFavoriteBoostChange != null
-    val rowCount = 3 + (if (isMosaic) 1 else 0) + (if (isGlitch) 3 else 0) + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
+    val rowCount = 3 + (if (isMosaic) 1 else 0) + (if (isGlitch) 4 else 0) + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
     Layout(
         content = {
             // Titles
@@ -427,27 +444,33 @@ private fun EffectsGrid(
             if (isMosaic) {
                 Text(
                     text = stringResource(R.string.settings_mosaic_opacity_title),
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
             if (isGlitch) {
                 Text(
-                    text = stringResource(R.string.settings_glitch_displacement_title),
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    text = stringResource(R.string.settings_glitch_h_displacement_title),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = stringResource(R.string.settings_glitch_v_displacement_title),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = stringResource(R.string.settings_glitch_channel_split_title),
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = stringResource(R.string.settings_glitch_pixel_sort_title),
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -467,7 +490,7 @@ private fun EffectsGrid(
             if (showParallax) {
                 Text(
                     text = stringResource(R.string.settings_parallax_amount_title),
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -475,7 +498,7 @@ private fun EffectsGrid(
             if (showFavoriteBoost) {
                 Text(
                     text = stringResource(R.string.settings_favorite_boost_title),
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -485,7 +508,7 @@ private fun EffectsGrid(
                 Slider(
                     value = mosaic.toFloat(),
                     onValueChange = { onMosaicChange(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onMosaicChangeFinished,
                     colors = sliderColors,
@@ -493,24 +516,32 @@ private fun EffectsGrid(
                 Slider(
                     value = mosaicOpacity.toFloat(),
                     onValueChange = { onMosaicOpacityChange(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onMosaicOpacityChangeFinished,
                     colors = sliderColors,
                 )
                 if (isGlitch) {
                     Slider(
-                        value = glitchDisplacement.toFloat(),
-                        onValueChange = { onGlitchDisplacementChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        value = glitchHDisplacement.toFloat(),
+                        onValueChange = { onGlitchHDisplacementChange(it.toInt()) },
+                        modifier = Modifier.padding(vertical = 4.dp),
                         valueRange = 0f..500f,
-                        onValueChangeFinished = onGlitchDisplacementChangeFinished,
+                        onValueChangeFinished = onGlitchHDisplacementChangeFinished,
+                        colors = sliderColors,
+                    )
+                    Slider(
+                        value = glitchVDisplacement.toFloat(),
+                        onValueChange = { onGlitchVDisplacementChange(it.toInt()) },
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        valueRange = 0f..500f,
+                        onValueChangeFinished = onGlitchVDisplacementChangeFinished,
                         colors = sliderColors,
                     )
                     Slider(
                         value = glitchChannelSplit.toFloat(),
                         onValueChange = { onGlitchChannelSplitChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        modifier = Modifier.padding(vertical = 4.dp),
                         valueRange = 0f..500f,
                         onValueChangeFinished = onGlitchChannelSplitChangeFinished,
                         colors = sliderColors,
@@ -518,7 +549,7 @@ private fun EffectsGrid(
                     Slider(
                         value = glitchPixelSort.toFloat(),
                         onValueChange = { onGlitchPixelSortChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        modifier = Modifier.padding(vertical = 4.dp),
                         valueRange = 0f..500f,
                         onValueChangeFinished = onGlitchPixelSortChangeFinished,
                         colors = sliderColors,
@@ -528,7 +559,7 @@ private fun EffectsGrid(
                 Slider(
                     value = blur.toFloat(),
                     onValueChange = { onBlurChange(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onBlurChangeFinished,
                     colors = sliderColors,
@@ -554,7 +585,7 @@ private fun EffectsGrid(
                 Slider(
                     value = parallax!!.toFloat(),
                     onValueChange = { onParallaxChange!!(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     valueRange = 0f..100f,
                     onValueChangeFinished = onParallaxChangeFinished,
                     colors = SliderDefaults.colors(
@@ -568,7 +599,7 @@ private fun EffectsGrid(
                 Slider(
                     value = favoriteBoost!!.toFloat(),
                     onValueChange = { onFavoriteBoostChange!!(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     valueRange = 0f..100f,
                     onValueChangeFinished = onFavoriteBoostChangeFinished,
                     colors = SliderDefaults.colors(
