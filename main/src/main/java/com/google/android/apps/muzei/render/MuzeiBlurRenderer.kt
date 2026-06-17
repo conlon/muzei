@@ -92,9 +92,8 @@ class MuzeiBlurRenderer(
         private const val DEMO_GREY = 0
         private const val DIM_RANGE = 0.5f // percent of max dim
         // At max amount, mosaic tile size = this fraction of source bitmap height.
-        // ~0.20 => ~5 tiles vertically at max, which reads as obviously mosaic'd
-        // without becoming unrecognisable.
-        private const val MOSAIC_MAX_TILE_FRACTION = 0.20f
+        // ~0.10 => ~10 tiles vertically at max.
+        private const val MOSAIC_MAX_TILE_FRACTION = 0.10f
     }
 
     private val blurKeyframes: Int
