@@ -72,6 +72,9 @@ fun EffectsScreen(
     mosaicPref: String,
     mosaicOpacityPref: String,
     mosaicShapePref: String,
+    glitchDisplacementPref: String = Prefs.PREF_GLITCH_DISPLACEMENT,
+    glitchChannelSplitPref: String = Prefs.PREF_GLITCH_CHANNEL_SPLIT,
+    glitchPixelSortPref: String = Prefs.PREF_GLITCH_PIXEL_SORT,
     parallaxPref: String? = null,
     showAutoFraming: Boolean = false,
     showFavoriteBoost: Boolean = false,
@@ -87,6 +90,12 @@ fun EffectsScreen(
         rememberPreferenceSourcedValue(prefs, mosaicPref, MuzeiBlurRenderer.DEFAULT_MOSAIC)
     val mosaicOpacity =
         rememberPreferenceSourcedValue(prefs, mosaicOpacityPref, MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY)
+    val glitchDisplacement =
+        rememberPreferenceSourcedValue(prefs, glitchDisplacementPref, MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT)
+    val glitchChannelSplit =
+        rememberPreferenceSourcedValue(prefs, glitchChannelSplitPref, MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT)
+    val glitchPixelSort =
+        rememberPreferenceSourcedValue(prefs, glitchPixelSortPref, MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT)
     val effectMode = rememberPreferenceSourcedStringValue(
         prefs, effectModePref, MuzeiBlurRenderer.DEFAULT_EFFECT_MODE
     )
@@ -114,6 +123,15 @@ fun EffectsScreen(
         mosaicOpacity = mosaicOpacity.value,
         onMosaicOpacityChange = { mosaicOpacity.value = it },
         onMosaicOpacityChangeFinished = { mosaicOpacity.userControlled = false },
+        glitchDisplacement = glitchDisplacement.value,
+        onGlitchDisplacementChange = { glitchDisplacement.value = it },
+        onGlitchDisplacementChangeFinished = { glitchDisplacement.userControlled = false },
+        glitchChannelSplit = glitchChannelSplit.value,
+        onGlitchChannelSplitChange = { glitchChannelSplit.value = it },
+        onGlitchChannelSplitChangeFinished = { glitchChannelSplit.userControlled = false },
+        glitchPixelSort = glitchPixelSort.value,
+        onGlitchPixelSortChange = { glitchPixelSort.value = it },
+        onGlitchPixelSortChangeFinished = { glitchPixelSort.userControlled = false },
         mosaicShape = mosaicShape.value,
         onMosaicShapeChange = { mosaicShape.value = it },
         dim = dim.value,
@@ -147,6 +165,15 @@ fun EffectsScreen(
     mosaicOpacity: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
     onMosaicOpacityChange: (Int) -> Unit = {},
     onMosaicOpacityChangeFinished: (() -> Unit) = {},
+    glitchDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT,
+    onGlitchDisplacementChange: (Int) -> Unit = {},
+    onGlitchDisplacementChangeFinished: (() -> Unit) = {},
+    glitchChannelSplit: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT,
+    onGlitchChannelSplitChange: (Int) -> Unit = {},
+    onGlitchChannelSplitChangeFinished: (() -> Unit) = {},
+    glitchPixelSort: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT,
+    onGlitchPixelSortChange: (Int) -> Unit = {},
+    onGlitchPixelSortChangeFinished: (() -> Unit) = {},
     mosaicShape: String,
     onMosaicShapeChange: (String) -> Unit,
     dim: Int,
@@ -200,6 +227,7 @@ fun EffectsScreen(
         EffectsGrid(
             modifier = contentModifier,
             effectMode = effectMode,
+            mosaicShape = mosaicShape,
             blur = blur,
             onBlurChange = onBlurChange,
             onBlurChangeFinished = onBlurChangeFinished,
@@ -209,6 +237,15 @@ fun EffectsScreen(
             mosaicOpacity = mosaicOpacity,
             onMosaicOpacityChange = onMosaicOpacityChange,
             onMosaicOpacityChangeFinished = onMosaicOpacityChangeFinished,
+            glitchDisplacement = glitchDisplacement,
+            onGlitchDisplacementChange = onGlitchDisplacementChange,
+            onGlitchDisplacementChangeFinished = onGlitchDisplacementChangeFinished,
+            glitchChannelSplit = glitchChannelSplit,
+            onGlitchChannelSplitChange = onGlitchChannelSplitChange,
+            onGlitchChannelSplitChangeFinished = onGlitchChannelSplitChangeFinished,
+            glitchPixelSort = glitchPixelSort,
+            onGlitchPixelSortChange = onGlitchPixelSortChange,
+            onGlitchPixelSortChangeFinished = onGlitchPixelSortChangeFinished,
             dim = dim,
             onDimChange = onDimChange,
             onDimChangeFinished = onDimChangeFinished,
@@ -333,6 +370,7 @@ private fun MosaicShapeSelector(
 private fun EffectsGrid(
     modifier: Modifier = Modifier,
     effectMode: String = MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
+    mosaicShape: String = MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE,
     blur: Int = MuzeiBlurRenderer.DEFAULT_BLUR,
     onBlurChange: (Int) -> Unit = {},
     onBlurChangeFinished: (() -> Unit) = {},
@@ -342,6 +380,15 @@ private fun EffectsGrid(
     mosaicOpacity: Int = MuzeiBlurRenderer.DEFAULT_MOSAIC_OPACITY,
     onMosaicOpacityChange: (Int) -> Unit = {},
     onMosaicOpacityChangeFinished: (() -> Unit) = {},
+    glitchDisplacement: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_DISPLACEMENT,
+    onGlitchDisplacementChange: (Int) -> Unit = {},
+    onGlitchDisplacementChangeFinished: (() -> Unit) = {},
+    glitchChannelSplit: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_CHANNEL_SPLIT,
+    onGlitchChannelSplitChange: (Int) -> Unit = {},
+    onGlitchChannelSplitChangeFinished: (() -> Unit) = {},
+    glitchPixelSort: Int = MuzeiBlurRenderer.DEFAULT_GLITCH_PIXEL_SORT,
+    onGlitchPixelSortChange: (Int) -> Unit = {},
+    onGlitchPixelSortChangeFinished: (() -> Unit) = {},
     dim: Int = MuzeiBlurRenderer.DEFAULT_MAX_DIM,
     onDimChange: (Int) -> Unit = {},
     onDimChangeFinished: (() -> Unit) = {},
@@ -361,9 +408,10 @@ private fun EffectsGrid(
         inactiveTrackColor = Color.DarkGray,
     )
     val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
+    val isGlitch = isMosaic && mosaicShape == Prefs.MOSAIC_SHAPE_GLITCH
     val showParallax = parallax != null && onParallaxChange != null
     val showFavoriteBoost = favoriteBoost != null && onFavoriteBoostChange != null
-    val rowCount = 3 + (if (isMosaic) 1 else 0) + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
+    val rowCount = 3 + (if (isMosaic) 1 else 0) + (if (isGlitch) 3 else 0) + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
     Layout(
         content = {
             // Titles
@@ -379,6 +427,26 @@ private fun EffectsGrid(
             if (isMosaic) {
                 Text(
                     text = stringResource(R.string.settings_mosaic_opacity_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            if (isGlitch) {
+                Text(
+                    text = stringResource(R.string.settings_glitch_displacement_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = stringResource(R.string.settings_glitch_channel_split_title),
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = stringResource(R.string.settings_glitch_pixel_sort_title),
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
@@ -430,6 +498,32 @@ private fun EffectsGrid(
                     onValueChangeFinished = onMosaicOpacityChangeFinished,
                     colors = sliderColors,
                 )
+                if (isGlitch) {
+                    Slider(
+                        value = glitchDisplacement.toFloat(),
+                        onValueChange = { onGlitchDisplacementChange(it.toInt()) },
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        valueRange = 0f..500f,
+                        onValueChangeFinished = onGlitchDisplacementChangeFinished,
+                        colors = sliderColors,
+                    )
+                    Slider(
+                        value = glitchChannelSplit.toFloat(),
+                        onValueChange = { onGlitchChannelSplitChange(it.toInt()) },
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        valueRange = 0f..500f,
+                        onValueChangeFinished = onGlitchChannelSplitChangeFinished,
+                        colors = sliderColors,
+                    )
+                    Slider(
+                        value = glitchPixelSort.toFloat(),
+                        onValueChange = { onGlitchPixelSortChange(it.toInt()) },
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        valueRange = 0f..500f,
+                        onValueChangeFinished = onGlitchPixelSortChangeFinished,
+                        colors = sliderColors,
+                    )
+                }
             } else {
                 Slider(
                     value = blur.toFloat(),

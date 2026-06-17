@@ -44,6 +44,9 @@ fun mosaicBitmap(
     source: Bitmap?,
     tileSizePx: Int,
     shape: MosaicShape = MosaicShape.SQUARE,
+    glitchDisplacement: Int = 250,
+    glitchChannelSplit: Int = 250,
+    glitchPixelSort: Int = 250,
 ): Bitmap? {
     if (source == null || source.width == 0 || source.height == 0) return null
     val tile = max(1, tileSizePx)
@@ -58,7 +61,7 @@ fun mosaicBitmap(
         MosaicShape.MIXED2 -> mixed2Mosaic(source, tile)
         MosaicShape.MIXED3 -> mixed3Mosaic(source, tile)
         MosaicShape.MIXED4 -> mixed4Mosaic(source, tile)
-        MosaicShape.GLITCH -> glitchMosaic(source, tile)
+        MosaicShape.GLITCH -> glitchMosaic(source, tile, glitchDisplacement, glitchChannelSplit, glitchPixelSort)
     }
 }
 
@@ -514,41 +517,57 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
 
 /**
  * Glitch: datamosh variation of Mixed1's recursive-block subdivision. After rendering
- * the base recursive blocks (all cells, no edge gate), three glitch passes are applied
- * in sequence on a flat IntArray pixel buffer (no boxing — avoids GC spikes):
+ * the base recursive blocks (all cells, no edge gate), four glitch passes run on a
+ * flat IntArray pixel buffer (no boxing — avoids GC spikes):
  *
- *   1. Horizontal band displacement — long bands (block shifts) and short ones (scanline
- *      tears), with wrap-around and occasional frozen rows (sync-error streaks).
- *   2. Pixel sorting — ~15% of rows get a contiguous run sorted by luminance, producing
- *      melted gradient streaks.
- *   3. RGB channel split — R and B channels sampled from laterally offset x positions to
- *      produce chromatic aberration, amplified in random horizontal bands.
+ *   1. Horizontal band displacement — block shifts and scanline tears, with wrap-around
+ *      and occasional frozen rows (sync-error streaks). Scaled by [displacement].
+ *   2. Vertical band displacement — same structure but along columns. Scaled by
+ *      [displacement]. Salt 16.
+ *   3. Pixel sorting — a sparse subset of rows sorted by luminance, producing melted
+ *      gradient streaks. Scaled by [pixelSort]. Salt 14.
+ *   4. 2-D RGB channel split (chromatic aberration) — R and B channels sampled from
+ *      offset (x,y) positions; horizontal bands (salt 15) and vertical bands (salt 17)
+ *      independently randomise the offset magnitude. Scaled by [channelSplit].
  *
- * All randomness uses the avalanche hash (mix32/hashInt/hashUnit) with salts 10–15 so
- * glitch patterns are deterministic per image and independent of tile size.
+ * All three strengths are 0–500, where 250 is the design baseline and 0 fully disables
+ * that technique. All randomness uses salts 10–17 (independent of other Mixed variants).
  */
-private fun glitchMosaic(source: Bitmap, tile: Int): Bitmap {
-    // ---- Tunable constants -----------------------------------------------
-    /** Fraction of displacement bands that hold zero offset (left as rendered). */
-    val ZERO_BAND_FRAC  = 0.35f
-    /** Maximum displacement as a fraction of image width. */
-    val DISP_MAX_FRAC   = 0.25f
+private fun glitchMosaic(
+    source: Bitmap,
+    tile: Int,
+    displacement: Int = 250,
+    channelSplit: Int = 250,
+    pixelSort: Int = 250,
+): Bitmap {
+    // ---- Normalised strengths [0.0, 1.0] per technique -------------------
+    val td = displacement / 500f   // displacement (horizontal + vertical)
+    val tc = channelSplit / 500f   // chromatic aberration
+    val ts = pixelSort / 500f      // pixel sorting
+
+    // ---- Tunable constants (documented; scale with strength) -------------
+    /** Fraction of displacement bands that hold zero offset. */
+    val ZERO_BAND_FRAC   = 0.35f
+    /** Max horizontal displacement: fraction of image width. At td=0.5 → 0.25·sW. */
+    val DISP_H_MAX_FRAC  = td * 0.5f
+    /** Max vertical displacement: fraction of image height. At td=0.5 → 0.25·sH. */
+    val DISP_V_MAX_FRAC  = td * 0.5f
     /** Fraction of displacement bands that are long block shifts (vs short tears). */
-    val BLOCK_BAND_FRAC = 0.40f
-    /** Block-shift run length range (in multiples of tile height). */
-    val BLOCK_MIN_TILES = 1; val BLOCK_MAX_TILES = 3
-    /** Scanline-tear run length range (rows). */
-    val TEAR_MIN_ROWS   = 1; val TEAR_MAX_ROWS   = 4
+    val BLOCK_BAND_FRAC  = 0.40f
+    /** Block-shift run length range (multiples of tile). */
+    val BLOCK_MIN_TILES  = 1; val BLOCK_MAX_TILES = 3
+    /** Scanline / column-tear run length range (rows or columns). */
+    val TEAR_MIN = 1; val TEAR_MAX = 4
     /** Per-row probability of a "frozen" (repeat-previous-row) sync-error glitch. */
-    val FROZEN_ROW_FRAC = 0.03f
-    /** Fraction of rows that receive pixel sorting. */
-    val SORT_ROW_FRAC   = 0.15f
-    /** Maximum pixel-sort run as a fraction of image width (capped at 1/3). */
-    val SORT_MAX_FRAC   = 0.30f
-    /** Base chromatic-aberration shift (pixels) applied to every pixel. */
-    val CA_BASE         = 2
-    /** Max additional shift (pixels) inside amplified CA bands. */
-    val CA_BAND_EXTRA   = 6
+    val FROZEN_ROW_FRAC  = 0.03f
+    /** Fraction of rows sorted. At ts=0.5 → 0.15. */
+    val SORT_ROW_FRAC    = ts * 0.30f
+    /** Max pixel-sort run as a fraction of width. At ts=0.5 → 0.30. */
+    val SORT_MAX_FRAC    = ts * 0.60f
+    /** Minimum channel-split offset (px). At tc=0.5 → 4px. */
+    val CA_MIN = (tc * 8f).toInt().coerceAtLeast(0)
+    /** Maximum channel-split offset (px). At tc=0.5 → 16px. */
+    val CA_MAX = (tc * 32f).toInt().coerceAtLeast(CA_MIN)
     // -----------------------------------------------------------------------
 
     val sW = source.width
@@ -613,7 +632,7 @@ private fun glitchMosaic(source: Bitmap, tile: Int): Bitmap {
     out.getPixels(buf, 0, sW, 0, 0, sW, sH)
 
     // ------------------------------------------------------------------
-    // Stage 2: Horizontal band displacement. Each band holds a fixed x-offset
+    // Stage 2a: Horizontal band displacement. Each band holds a fixed x-offset
     // (content wraps around) for a run of rows. Long runs → block shifts;
     // short runs → scanline tears. Occasional rows repeat the previous row
     // (sync-error freeze). Salt 13.
@@ -621,57 +640,92 @@ private fun glitchMosaic(source: Bitmap, tile: Int): Bitmap {
     val rowTmp  = IntArray(sW)
     val prevRow = IntArray(sW)
     var hasPrev = false
-    var runLeft = 0
-    var curOffset = 0
+    var hRunLeft = 0
+    var hOffset  = 0
 
     for (y in 0 until sH) {
-        if (runLeft <= 0) {
-            // Roll a new band keyed on this row index.
+        if (hRunLeft <= 0) {
             val h0 = hashUnit(y, 0, 13)   // zero-band gate
             val h1 = hashUnit(y, 1, 13)   // block vs tear
             val h2 = hashUnit(y, 2, 13)   // run-length fraction
             val h3 = hashUnit(y, 3, 13)   // offset magnitude
             val h4 = hashUnit(y, 4, 13)   // offset sign
             val isBlock = h1 < BLOCK_BAND_FRAC
-            runLeft = if (isBlock) {
+            hRunLeft = if (isBlock) {
                 ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile)
                     .coerceAtLeast(1)
             } else {
-                (TEAR_MIN_ROWS + (h2 * (TEAR_MAX_ROWS - TEAR_MIN_ROWS + 1)).toInt())
-                    .coerceAtLeast(1)
+                (TEAR_MIN + (h2 * (TEAR_MAX - TEAR_MIN + 1)).toInt()).coerceAtLeast(1)
             }
-            curOffset = if (h0 < ZERO_BAND_FRAC) {
+            hOffset = if (h0 < ZERO_BAND_FRAC || DISP_H_MAX_FRAC <= 0f) {
                 0
             } else {
-                val mag = (h3 * DISP_MAX_FRAC * sW).toInt()
+                val mag = (h3 * DISP_H_MAX_FRAC * sW).toInt()
                 if (h4 < 0.5f) mag else -mag
             }
         }
-        runLeft--
+        hRunLeft--
 
         val rowStart = y * sW
-        // Frozen row: repeat the previous row unchanged (sync-error streak).
         val isFrozen = hasPrev && hashUnit(y, 5, 13) < FROZEN_ROW_FRAC
         if (isFrozen) {
             System.arraycopy(prevRow, 0, buf, rowStart, sW)
-        } else if (curOffset != 0) {
-            // Shift this row's content left by `off` pixels, wrapping around.
+        } else if (hOffset != 0) {
             System.arraycopy(buf, rowStart, rowTmp, 0, sW)
-            val off = ((curOffset % sW) + sW) % sW  // normalise to [0, sW)
+            val off = ((hOffset % sW) + sW) % sW
             System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
             System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
         }
-        // Save this row as the freeze candidate for the next row.
         System.arraycopy(buf, rowStart, prevRow, 0, sW)
         hasPrev = true
     }
 
     // ------------------------------------------------------------------
+    // Stage 2b: Vertical band displacement. Same structure as 2a but along
+    // columns — each column-band holds a fixed y-offset with wrap-around.
+    // Column reads and writes are strided (one element per sW step). Salt 16.
+    // ------------------------------------------------------------------
+    val colTmp = IntArray(sH)
+    var vRunLeft = 0
+    var vOffset  = 0
+
+    for (x in 0 until sW) {
+        if (vRunLeft <= 0) {
+            val h0 = hashUnit(x, 0, 16)
+            val h1 = hashUnit(x, 1, 16)
+            val h2 = hashUnit(x, 2, 16)
+            val h3 = hashUnit(x, 3, 16)
+            val h4 = hashUnit(x, 4, 16)
+            val isBlock = h1 < BLOCK_BAND_FRAC
+            vRunLeft = if (isBlock) {
+                ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile)
+                    .coerceAtLeast(1)
+            } else {
+                (TEAR_MIN + (h2 * (TEAR_MAX - TEAR_MIN + 1)).toInt()).coerceAtLeast(1)
+            }
+            vOffset = if (h0 < ZERO_BAND_FRAC || DISP_V_MAX_FRAC <= 0f) {
+                0
+            } else {
+                val mag = (h3 * DISP_V_MAX_FRAC * sH).toInt()
+                if (h4 < 0.5f) mag else -mag
+            }
+        }
+        vRunLeft--
+        if (vOffset != 0) {
+            // Read column x into scratch, shift, write back.
+            for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
+            val off = ((vOffset % sH) + sH) % sH
+            for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
+            for (y in sH - off until sH) { buf[y * sW + x] = colTmp[y + off - sH] }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Stage 3: Pixel sorting. A sparse subset of rows get one contiguous
     // run sorted by luminance to produce melted gradient streaks.
-    // Encoding: (lum xor 0x80) in bits 31–24 maps the range 0..255 onto a
+    // Encoding: (lum xor 0x80) in bits 31–24 maps 0..255 onto a
     // monotonically increasing signed integer so IntArray.sort() gives
-    // ascending luminance order; position stored in bits 23–0. Salt 14.
+    // ascending luminance order; position in bits 23–0. Salt 14.
     // ------------------------------------------------------------------
     val maxRun  = (sW * SORT_MAX_FRAC).toInt().coerceAtLeast(2)
     val sortKey = IntArray(maxRun)
@@ -689,9 +743,9 @@ private fun glitchMosaic(source: Bitmap, tile: Int): Bitmap {
             val r   = (px shr 16) and 0xFF
             val g   = (px shr 8)  and 0xFF
             val b   = px and 0xFF
-            val lum = (r * 77 + g * 150 + b * 29) ushr 8   // integer luma 0..255
+            val lum = (r * 77 + g * 150 + b * 29) ushr 8
             sortPix[i] = px
-            sortKey[i] = ((lum xor 0x80) shl 24) or i      // ascending signed sort ↔ ascending lum
+            sortKey[i] = ((lum xor 0x80) shl 24) or i
         }
         sortKey.sort(0, runLen)
         for (d in 0 until runLen) {
@@ -700,36 +754,56 @@ private fun glitchMosaic(source: Bitmap, tile: Int): Bitmap {
     }
 
     // ------------------------------------------------------------------
-    // Stage 4: RGB channel split (chromatic aberration). R is sampled from
-    // x−dR, B from x+dB; G stays at x. A small base shift everywhere,
-    // amplified inside random horizontal bands. Salt 15.
+    // Stage 4: 2-D RGB channel split (chromatic aberration).
+    //   R sampled from (x−dRx, y−dRy);  B from (x+dBx, y+dBy);  G at (x,y).
+    // Horizontal offsets (dRx/dBx) from per-row bands (salt 15); vertical
+    // offsets (dRy/dBy) from per-column bands precomputed below (salt 17).
+    // All offsets range from CA_MIN (base) to CA_MAX (amplified bands).
     // ------------------------------------------------------------------
+
+    // Precompute vertical CA offset per column (salt 17).
+    val colVDr = IntArray(sW)
+    val colVDb = IntArray(sW)
+    var cvLeft = 0; var cvDr = CA_MIN; var cvDb = CA_MIN
+    for (x in 0 until sW) {
+        if (cvLeft <= 0) {
+            val hv0 = hashUnit(x, 0, 17)
+            val hv1 = hashUnit(x, 1, 17)
+            val hv2 = hashUnit(x, 2, 17)
+            cvLeft = (1 + (hv0 * tile * 3f).toInt()).coerceAtLeast(1)
+            val vExtra = (hv1 * (CA_MAX - CA_MIN).toFloat()).toInt()
+            if (hv2 < 0.30f) { cvDr = CA_MIN; cvDb = CA_MIN }
+            else             { cvDr = CA_MIN + vExtra; cvDb = CA_MIN + vExtra }
+        }
+        cvLeft--
+        colVDr[x] = cvDr; colVDb[x] = cvDb
+    }
+
     val out2   = IntArray(sW * sH)
     var caLeft = 0
-    var caDr   = CA_BASE
-    var caDb   = CA_BASE
+    var caDr   = CA_MIN
+    var caDb   = CA_MIN
 
     for (y in 0 until sH) {
         if (caLeft <= 0) {
-            val h0 = hashUnit(y, 0, 15)   // band-length fraction
-            val h1 = hashUnit(y, 1, 15)   // extra CA strength
-            val h2 = hashUnit(y, 2, 15)   // amplified vs base gate
+            val h0 = hashUnit(y, 0, 15)
+            val h1 = hashUnit(y, 1, 15)
+            val h2 = hashUnit(y, 2, 15)
             caLeft = (1 + (h0 * tile * 3f).toInt()).coerceAtLeast(1)
-            val extra = (h1 * CA_BAND_EXTRA).toInt()
-            if (h2 < 0.30f) {
-                caDr = CA_BASE; caDb = CA_BASE       // not amplified
-            } else {
-                caDr = CA_BASE + extra; caDb = CA_BASE + extra
-            }
+            val extra = (h1 * (CA_MAX - CA_MIN).toFloat()).toInt()
+            if (h2 < 0.30f) { caDr = CA_MIN; caDb = CA_MIN }
+            else             { caDr = CA_MIN + extra; caDb = CA_MIN + extra }
         }
         caLeft--
         val rowStart = y * sW
         for (x in 0 until sW) {
             val xR = (x - caDr).coerceIn(0, sW - 1)
             val xB = (x + caDb).coerceIn(0, sW - 1)
-            val pr = buf[rowStart + xR]
+            val yR = (y - colVDr[x]).coerceIn(0, sH - 1)
+            val yB = (y + colVDb[x]).coerceIn(0, sH - 1)
+            val pr = buf[yR * sW + xR]
             val pg = buf[rowStart + x]
-            val pb = buf[rowStart + xB]
+            val pb = buf[yB * sW + xB]
             out2[rowStart + x] = 0xFF000000.toInt() or
                     (pr and 0x00FF0000) or
                     (pg and 0x0000FF00) or

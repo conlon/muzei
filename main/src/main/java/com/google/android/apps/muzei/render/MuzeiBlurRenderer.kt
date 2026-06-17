@@ -81,6 +81,9 @@ class MuzeiBlurRenderer(
         const val DEFAULT_MAX_DIM = 128 // technical max 255
         const val DEFAULT_MOSAIC = 100 // max 500
         const val DEFAULT_MOSAIC_OPACITY = 500 // max 500; 500 = full mosaic (preserves existing look)
+        const val DEFAULT_GLITCH_DISPLACEMENT = 250  // max 500
+        const val DEFAULT_GLITCH_CHANNEL_SPLIT = 250 // max 500
+        const val DEFAULT_GLITCH_PIXEL_SORT = 250    // max 500
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
         const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
         private const val DEMO_BLUR = 250
@@ -100,6 +103,9 @@ class MuzeiBlurRenderer(
     private var maxGrey: Int = 0
     private var mosaicAmount: Int = DEFAULT_MOSAIC
     private var mosaicOpacity: Int = DEFAULT_MOSAIC_OPACITY
+    private var glitchDisplacement: Int = DEFAULT_GLITCH_DISPLACEMENT
+    private var glitchChannelSplit: Int = DEFAULT_GLITCH_CHANNEL_SPLIT
+    private var glitchPixelSort: Int = DEFAULT_GLITCH_PIXEL_SORT
     private var currentEffectMode: String = DEFAULT_EFFECT_MODE
     private var currentMosaicShape: MosaicShape = MosaicShape.SQUARE
     private var mosaicRandom: Boolean = false
@@ -135,6 +141,9 @@ class MuzeiBlurRenderer(
     private var greyPreferenceName = Prefs.PREF_GREY_AMOUNT
     private var mosaicPreferenceName = Prefs.PREF_MOSAIC_AMOUNT
     private var mosaicOpacityPreferenceName = Prefs.PREF_MOSAIC_OPACITY
+    private var glitchDisplacementPreferenceName = Prefs.PREF_GLITCH_DISPLACEMENT
+    private var glitchChannelSplitPreferenceName = Prefs.PREF_GLITCH_CHANNEL_SPLIT
+    private var glitchPixelSortPreferenceName = Prefs.PREF_GLITCH_PIXEL_SORT
     private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
     private var mosaicShapePreferenceName = Prefs.PREF_MOSAIC_SHAPE
     private var blurRelatedToArtDetailMode = false
@@ -156,6 +165,9 @@ class MuzeiBlurRenderer(
         recomputeGreyAmount()
         recomputeMosaicAmount()
         recomputeMosaicOpacity()
+        recomputeGlitchDisplacement()
+        recomputeGlitchChannelSplit()
+        recomputeGlitchPixelSort()
         recomputeEffectMode()
         recomputeMosaicShape()
     }
@@ -214,6 +226,33 @@ class MuzeiBlurRenderer(
         mosaicOpacityPreferenceName = newMosaicOpacityPreferenceName
         mosaicOpacity = Prefs.getSharedPreferences(context)
                 .getInt(mosaicOpacityPreferenceName, DEFAULT_MOSAIC_OPACITY)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchDisplacement(
+            newGlitchDisplacementPreferenceName: String = glitchDisplacementPreferenceName
+    ) {
+        glitchDisplacementPreferenceName = newGlitchDisplacementPreferenceName
+        glitchDisplacement = Prefs.getSharedPreferences(context)
+                .getInt(glitchDisplacementPreferenceName, DEFAULT_GLITCH_DISPLACEMENT)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchChannelSplit(
+            newGlitchChannelSplitPreferenceName: String = glitchChannelSplitPreferenceName
+    ) {
+        glitchChannelSplitPreferenceName = newGlitchChannelSplitPreferenceName
+        glitchChannelSplit = Prefs.getSharedPreferences(context)
+                .getInt(glitchChannelSplitPreferenceName, DEFAULT_GLITCH_CHANNEL_SPLIT)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchPixelSort(
+            newGlitchPixelSortPreferenceName: String = glitchPixelSortPreferenceName
+    ) {
+        glitchPixelSortPreferenceName = newGlitchPixelSortPreferenceName
+        glitchPixelSort = Prefs.getSharedPreferences(context)
+                .getInt(glitchPixelSortPreferenceName, DEFAULT_GLITCH_PIXEL_SORT)
                 .coerceIn(0, 500)
     }
 
@@ -710,7 +749,8 @@ class MuzeiBlurRenderer(
             val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
-                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape)
+                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape,
+                        glitchDisplacement, glitchChannelSplit, glitchPixelSort)
 
                 // Blend the mosaic over the (original) scaled photo when opacity < 500.
                 // This respects grey (desaturate step below) and dim (draw-time overlay).
