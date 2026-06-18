@@ -51,9 +51,9 @@ enum class MosaicShape { SQUARE, EQUILATERAL, IRREGULAR, HEXAGON, CIRCLE, RANDOM
 //   20   : RECURSIVE triangle subdivision gate
 //   21   : RECURSIVE hexagon child count + corner placement
 //   22   : GLITCH2 H chunk start / length / sign
-//   23   : GLITCH2 H per-row smear jitter
+//   23   : GLITCH2 H per-row smear random-walk step
 //   24   : GLITCH2 V chunk start / length / sign
-//   25   : GLITCH2 V per-col smear jitter
+//   25   : GLITCH2 V per-col smear random-walk step
 //   26   : GLITCH2 pixel-tear chunk start + length
 //   27   : GLITCH2 pixel-tear per-row band (run length + start)
 enum class MosaicFilter { NONE, RAINDROP, GLITCH1, GLITCH2, RECURSIVE }
@@ -1141,11 +1141,15 @@ private fun glitch2Filter(
                 if (hOffset != 0) {
                     val yStart = cr * tile
                     val yEnd = min((cr + lenCells) * tile, sH)
-                    // Per-row smear: each scanline shifts by hOffset ± jitter (salt 23).
-                    val smearAmp = max(1, (Math.abs(hOffset) * 0.20f).toInt())
+                    // Per-row smear: bounded random walk (salt 23). Each row nudges a
+                    // running accumulator by ±stepAmp; neighbours stay close.
+                    val stepAmp = max(1f, Math.abs(hOffset) * 0.05f)
+                    val maxDev  = max(1f, Math.abs(hOffset) * 0.20f)
+                    var accum = 0f
                     for (y in yStart until yEnd) {
-                        val jitter = ((hashUnit(y, 0, 23) - 0.5f) * 2f * smearAmp).toInt()
-                        val rowOff = hOffset + jitter
+                        accum = (accum + (hashUnit(y, 0, 23) - 0.5f) * 2f * stepAmp)
+                            .coerceIn(-maxDev, maxDev)
+                        val rowOff = hOffset + accum.toInt()
                         if (rowOff != 0) {
                             val rowStart = y * sW
                             System.arraycopy(buf, rowStart, rowTmp, 0, sW)
@@ -1177,11 +1181,15 @@ private fun glitch2Filter(
                 if (vOffset != 0) {
                     val xStart = cc * tile
                     val xEnd = min((cc + lenCells) * tile, sW)
-                    // Per-col smear: each column shifts by vOffset ± jitter (salt 25).
-                    val smearAmp = max(1, (Math.abs(vOffset) * 0.20f).toInt())
+                    // Per-col smear: bounded random walk (salt 25). Each column nudges a
+                    // running accumulator by ±stepAmp; neighbours stay close.
+                    val stepAmp = max(1f, Math.abs(vOffset) * 0.05f)
+                    val maxDev  = max(1f, Math.abs(vOffset) * 0.20f)
+                    var accum = 0f
                     for (x in xStart until xEnd) {
-                        val jitter = ((hashUnit(x, 0, 25) - 0.5f) * 2f * smearAmp).toInt()
-                        val colOff = vOffset + jitter
+                        accum = (accum + (hashUnit(x, 0, 25) - 0.5f) * 2f * stepAmp)
+                            .coerceIn(-maxDev, maxDev)
+                        val colOff = vOffset + accum.toInt()
                         if (colOff != 0) {
                             for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
                             val off = ((colOff % sH) + sH) % sH
