@@ -27,6 +27,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -573,18 +574,42 @@ private fun recursiveHexImpl(source: Bitmap, tile: Int): Bitmap {
             val gridCol = (cx / colSpacing).toInt().coerceIn(0, numCols2 - 1)
             val gridRow = (cy / rowSpacing).toInt().coerceIn(0, numRows2 - 1)
             if (em.edgeMag(gridCol, gridRow) < EDGE_THRESHOLD) continue
-            // Nestle 2 or 3 child hexagons into corners of the parent.
-            val rc = r * 0.30f          // child circumradius ≈ 30% of parent
-            val d = r - rc              // distance from parent centre to child centre
+            // 3 or 6 children sized so they meet edge-to-edge / corner-to-corner.
             val h21 = hashUnit(col, row, 21)
-            val count = if (h21 < 0.5f) 2 else 3
-            val k0 = ((h21 * 6f).toInt() % 6)  // starting vertex index (0..5)
-            for (ci in 0 until count) {
-                val k = (k0 + ci * 2) % 6    // every other vertex
-                val a = k * 60f * PI.toFloat() / 180f
-                val childCx = cx + d * cos(a)
-                val childCy = cy + d * sin(a)
-                drawHex(childCx, childCy, rc, childPaint, childCx, childCy)
+            val count = if (h21 < 0.5f) 3 else 6
+            val k0 = ((h21 * 6f).toInt() % 6)  // θ0: snapped to one of 6 parent-vertex angles
+            if (count == 3) {
+                // Flat-top children (same orientation as parent): rc = r/2.
+                // Centers at distance rc from parent center at θ0+k*120°. Each child has
+                // the parent center as a vertex; adjacent pairs share a full edge. 75% fill.
+                val rc = r / 2f
+                for (ci in 0 until 3) {
+                    val a = (k0 * 60f + ci * 120f) * PI.toFloat() / 180f
+                    val childCx = cx + rc * cos(a)
+                    val childCy = cy + rc * sin(a)
+                    drawHex(childCx, childCy, rc, childPaint, childCx, childCy)
+                }
+            } else {
+                // 6 pointy-top children (rotated 30° vs flat-top parent): rc = r/3.
+                // Centers at d = sqrt(3)*rc ≈ r/sqrt(3) at k*60°. Adjacent children
+                // touch at shared corners.
+                val rc = r / 3f
+                val dist = sqrt(3f) * rc
+                for (ci in 0 until 6) {
+                    val a = ci * 60f * PI.toFloat() / 180f
+                    val childCx = cx + dist * cos(a)
+                    val childCy = cy + dist * sin(a)
+                    childPaint.color = sampler.sample(childCx, childCy) or (0xFF shl 24)
+                    path.rewind()
+                    for (k in 0..5) {
+                        val va = (30f + k * 60f) * PI.toFloat() / 180f
+                        val vxc = childCx + rc * cos(va)
+                        val vyc = childCy + rc * sin(va)
+                        if (k == 0) path.moveTo(vxc, vyc) else path.lineTo(vxc, vyc)
+                    }
+                    path.close()
+                    canvas.drawPath(path, childPaint)
+                }
             }
         }
     }
@@ -1092,72 +1117,67 @@ private fun glitch2Filter(
     val maxColDensity = colDensity.max().coerceAtLeast(1e-6f)
     val normColDensity = FloatArray(colDensity.size) { colDensity[it] / maxColDensity }
 
-    // ---- Markov constants ----
-    val P_START_BASE = 0.04f
-    val P_START_GAIN = 0.40f
-    val P_CONTINUE   = 0.88f
-    val MAX_RUN_H = (tile * 4).coerceAtLeast(4)
-    val MAX_RUN_V = (tile * 4).coerceAtLeast(4)
+    // ---- Cell-chunk glitch constants ----
+    // Frequency = slider * (P_BASE + P_GAIN * density). Bigger tile → fewer cells →
+    // fewer glitch events; halving the slider halves the rate. No constant baseline term.
+    val G_P_BASE = 0.04f
+    val G_P_GAIN = 0.20f
 
-    // ---- H-displacement (salts 22/23): Markov per-row ----
+    // ---- H-displacement (salts 22/23): cell-row chunks ----
+    // Each chunk: 1-3 cell-rows all shifted by the same offset (block tear).
     if (tdH > 0f) {
         val rowTmp = IntArray(sW)
-        var inRun = false; var runLeft = 0; var hOffset = 0
-        for (y in 0 until sH) {
-            val gridRow = (y / tile).coerceIn(0, normRowDensity.size - 1)
-            val density = normRowDensity[gridRow]
-            val pStart = P_START_BASE + P_START_GAIN * density
-            val h22run = hashUnit(y, 0, 22); val h22mag = hashUnit(y, 1, 22); val h22sign = hashUnit(y, 2, 22)
-            if (!inRun) {
-                if (h22run < pStart) {
-                    inRun = true; runLeft = MAX_RUN_H
-                    val maxDisp = (density * tdH * 0.5f + tdH * 0.05f) * sW
-                    val mag = (h22mag * maxDisp).toInt()
-                    hOffset = if (mag == 0) 0 else if (h22sign < 0.5f) mag else -mag
+        var cr = 0
+        while (cr < numRows) {
+            val density = normRowDensity[cr.coerceIn(0, normRowDensity.size - 1)]
+            val pStart = tdH * (G_P_BASE + G_P_GAIN * density)
+            if (hashUnit(cr, 0, 22) < pStart) {
+                val lenCells = 1 + (hashUnit(cr, 1, 22) * 3f).toInt()
+                val rawMag = (tdH * (0.10f + 0.35f * density) * sW).toInt()
+                val hOffset = if (rawMag == 0) 0 else if (hashUnit(cr, 2, 22) < 0.5f) rawMag else -rawMag
+                if (hOffset != 0) {
+                    val yStart = cr * tile
+                    val yEnd = min((cr + lenCells) * tile, sH)
+                    for (y in yStart until yEnd) {
+                        val rowStart = y * sW
+                        System.arraycopy(buf, rowStart, rowTmp, 0, sW)
+                        val off = ((hOffset % sW) + sW) % sW
+                        System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
+                        System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
+                    }
                 }
+                cr += lenCells
             } else {
-                runLeft--
-                if (runLeft <= 0 || hashUnit(y, 3, 22) >= P_CONTINUE) {
-                    inRun = false; hOffset = 0
-                }
-            }
-            if (hOffset != 0) {
-                val rowStart = y * sW
-                System.arraycopy(buf, rowStart, rowTmp, 0, sW)
-                val off = ((hOffset % sW) + sW) % sW
-                System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
-                System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
+                cr++
             }
         }
     }
 
-    // ---- V-displacement (salts 24/25): Markov per-column ----
+    // ---- V-displacement (salts 24/25): cell-column chunks ----
+    // Each chunk: 1-3 cell-columns all shifted by the same vertical offset.
     if (tdV > 0f) {
         val colTmp = IntArray(sH)
-        var inRun = false; var runLeft = 0; var vOffset = 0
-        for (x in 0 until sW) {
-            val gridCol = (x / tile).coerceIn(0, normColDensity.size - 1)
-            val density = normColDensity[gridCol]
-            val pStart = P_START_BASE + P_START_GAIN * density
-            val h24run = hashUnit(x, 0, 24); val h24mag = hashUnit(x, 1, 24); val h24sign = hashUnit(x, 2, 24)
-            if (!inRun) {
-                if (h24run < pStart) {
-                    inRun = true; runLeft = MAX_RUN_V
-                    val maxDisp = (density * tdV * 0.5f + tdV * 0.05f) * sH
-                    val mag = (h24mag * maxDisp).toInt()
-                    vOffset = if (mag == 0) 0 else if (h24sign < 0.5f) mag else -mag
+        var cc = 0
+        while (cc < numCols) {
+            val density = normColDensity[cc.coerceIn(0, normColDensity.size - 1)]
+            val pStart = tdV * (G_P_BASE + G_P_GAIN * density)
+            if (hashUnit(cc, 0, 24) < pStart) {
+                val lenCells = 1 + (hashUnit(cc, 1, 24) * 3f).toInt()
+                val rawMag = (tdV * (0.10f + 0.35f * density) * sH).toInt()
+                val vOffset = if (rawMag == 0) 0 else if (hashUnit(cc, 2, 24) < 0.5f) rawMag else -rawMag
+                if (vOffset != 0) {
+                    val xStart = cc * tile
+                    val xEnd = min((cc + lenCells) * tile, sW)
+                    for (x in xStart until xEnd) {
+                        for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
+                        val off = ((vOffset % sH) + sH) % sH
+                        for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
+                        for (y in sH - off until sH) { buf[y * sW + x] = colTmp[y + off - sH] }
+                    }
                 }
+                cc += lenCells
             } else {
-                runLeft--
-                if (runLeft <= 0 || hashUnit(x, 3, 24) >= P_CONTINUE) {
-                    inRun = false; vOffset = 0
-                }
-            }
-            if (vOffset != 0) {
-                for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
-                val off = ((vOffset % sH) + sH) % sH
-                for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
-                for (y in sH - off until sH) { buf[y * sW + x] = colTmp[y + off - sH] }
+                cc++
             }
         }
     }
@@ -1189,9 +1209,11 @@ private fun applyPixelSort(buf: IntArray, sW: Int, sH: Int, sortRowFrac: Float, 
 }
 
 /**
- * Pixel tears — Markov-banded luminance sort for GLITCH2 (salt 26).
- * Groups sorted rows into rectangular bands (MAX_BAND rows wide) inside
- * high-density regions, so tears read as clumps rather than isolated lines.
+ * Pixel tears — cell-granularity luminance sort for GLITCH2 (salt 26).
+ * Walks cell-rows and starts sort-bands as chunks of 1-3 cells. Within each chunk
+ * all rows sort the same fixed horizontal band, so tears appear as solid rectangular
+ * blocks rather than isolated per-row lines. Frequency and band width scale with
+ * [pixelSort] (= slider/500). Bigger tile → fewer cells → fewer tear events.
  *
  * [pixelSort] ∈ [0,1] is the raw slider fraction.
  * [rowDensity] is the normalised per-grid-row density array from [glitch2Filter].
@@ -1204,48 +1226,37 @@ private fun applyPixelTears(
 ) {
     if (pixelSort <= 0f) return
     val maxRun = (sW * (pixelSort * 0.60f)).toInt().coerceAtLeast(2)
-    val MAX_BAND = 6
-    val P_BAND_START_BASE = 0.05f
-    val P_BAND_START_GAIN = 0.35f
-    val P_BAND_CONTINUE   = 0.82f
+    val P_BASE = 0.04f
+    val P_GAIN = 0.20f
 
     val sortKey = IntArray(maxRun); val sortPix = IntArray(maxRun)
-    var inBand = false; var bandLeft = 0
-    // Band parameters fixed for the whole band's duration
-    var bandRunLen = maxRun; var bandStart = 0
+    val numCellRows = rowDensity.size
 
-    for (y in 0 until sH) {
-        val gridRow = (y / tile).coerceIn(0, rowDensity.size - 1)
-        val density = rowDensity[gridRow]
-        val h26 = hashUnit(y, 0, 26)
-        val pStart = P_BAND_START_BASE + P_BAND_START_GAIN * density
-
-        if (!inBand) {
-            if (h26 < pStart) {
-                inBand = true; bandLeft = MAX_BAND
-                // Fix the run parameters for this whole band
-                bandRunLen = (hashUnit(y, 1, 26) * maxRun).toInt().coerceIn(2, maxRun)
-                bandStart  = (hashUnit(y, 2, 26) * (sW - bandRunLen)).toInt().coerceIn(0, sW - bandRunLen)
+    var cr = 0
+    while (cr < numCellRows) {
+        val density = rowDensity[cr.coerceIn(0, rowDensity.size - 1)]
+        val pStart = pixelSort * (P_BASE + P_GAIN * density)
+        if (hashUnit(cr, 0, 26) < pStart) {
+            val lenCells = 1 + (hashUnit(cr, 1, 26) * 3f).toInt()
+            // Fix the sort band for this entire chunk
+            val bandRunLen = (hashUnit(cr, 2, 26) * maxRun).toInt().coerceIn(2, maxRun)
+            val bandStart  = (hashUnit(cr, 3, 26) * (sW - bandRunLen)).toInt().coerceIn(0, sW - bandRunLen)
+            val yStart = cr * tile
+            val yEnd = min((cr + lenCells) * tile, sH)
+            for (y in yStart until yEnd) {
+                val base2 = y * sW + bandStart
+                for (i in 0 until bandRunLen) {
+                    val px = buf[base2 + i]
+                    val lum = ((px shr 16 and 0xFF) * 77 + (px shr 8 and 0xFF) * 150 + (px and 0xFF) * 29) ushr 8
+                    sortPix[i] = px; sortKey[i] = ((lum xor 0x80) shl 24) or i
+                }
+                sortKey.sort(0, bandRunLen)
+                for (d in 0 until bandRunLen) { buf[base2 + d] = sortPix[sortKey[d] and 0x00FFFFFF] }
             }
+            cr += lenCells
         } else {
-            bandLeft--
-            if (bandLeft <= 0 || hashUnit(y, 3, 26) >= P_BAND_CONTINUE) {
-                inBand = false
-            }
+            cr++
         }
-
-        if (!inBand && h26 >= pStart) continue  // no band, no sort
-        if (!inBand) continue
-
-        // Sort the fixed band region by luminance
-        val base2 = y * sW + bandStart
-        for (i in 0 until bandRunLen) {
-            val px = buf[base2 + i]
-            val lum = ((px shr 16 and 0xFF) * 77 + (px shr 8 and 0xFF) * 150 + (px and 0xFF) * 29) ushr 8
-            sortPix[i] = px; sortKey[i] = ((lum xor 0x80) shl 24) or i
-        }
-        sortKey.sort(0, bandRunLen)
-        for (d in 0 until bandRunLen) { buf[base2 + d] = sortPix[sortKey[d] and 0x00FFFFFF] }
     }
 }
 
