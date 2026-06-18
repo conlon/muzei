@@ -316,6 +316,9 @@ class GallerySettingsActivity : ComponentActivity() {
                                         selectedPhotoIds.add(chosenPhoto.id)
                                     }
                                 },
+                                onToggleEnabled = { chosenPhoto ->
+                                    viewModel.toggleEnabled(chosenPhoto)
+                                },
                             ) { chosenPhoto, maxImages ->
                                 if (chosenPhoto.isTreeUri)
                                     getImagesFromTreeUri(chosenPhoto.uri, maxImages)

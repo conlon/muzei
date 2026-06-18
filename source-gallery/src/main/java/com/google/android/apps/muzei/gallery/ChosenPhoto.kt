@@ -34,7 +34,9 @@ data class ChosenPhoto(
         @field:TypeConverters(UriTypeConverter::class)
         val uri: Uri,
         @ColumnInfo(name = "is_tree_uri")
-        var isTreeUri: Boolean = false
+        var isTreeUri: Boolean = false,
+        @ColumnInfo(name = "enabled", defaultValue = "1")
+        var enabled: Boolean = true
 ) {
 
     @PrimaryKey(autoGenerate = true)

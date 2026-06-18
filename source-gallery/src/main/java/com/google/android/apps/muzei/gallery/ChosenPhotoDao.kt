@@ -60,6 +60,12 @@ internal abstract class ChosenPhotoDao {
     @get:Query("SELECT * FROM chosen_photos ORDER BY _id DESC")
     internal abstract val chosenPhotosBlocking: List<ChosenPhoto>
 
+    @get:Query("SELECT uri FROM chosen_photos WHERE enabled = 0")
+    internal abstract val disabledUriStringsBlocking: List<String>
+
+    @Query("UPDATE chosen_photos SET enabled = :enabled WHERE _id IN (:ids)")
+    internal abstract suspend fun setEnabled(ids: List<Long>, enabled: Boolean)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     internal abstract suspend fun insertInternal(chosenPhoto: ChosenPhoto): Long
 
