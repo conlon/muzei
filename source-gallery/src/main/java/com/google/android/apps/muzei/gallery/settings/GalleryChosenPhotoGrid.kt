@@ -57,6 +57,7 @@ fun GalleryChosenPhotoGrid(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     checkedItemIds: Set<Long> = emptySet(),
     onCheckedToggled: (ChosenPhoto) -> Unit = {},
+    onToggleEnabled: (ChosenPhoto) -> Unit = {},
     imageProvider: (chosenPhoto: ChosenPhoto, maxImages: Int) -> List<Uri>,
 ) {
     GalleryChosenPhotoGrid(
@@ -67,6 +68,7 @@ fun GalleryChosenPhotoGrid(
         contentPadding,
         checkedItemIds,
         onCheckedToggled,
+        onToggleEnabled,
         imageProvider
     )
 }
@@ -78,6 +80,7 @@ fun GalleryChosenPhotoGrid(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     checkedItemIds: Set<Long> = emptySet(),
     onCheckedToggled: (ChosenPhoto) -> Unit = {},
+    onToggleEnabled: (ChosenPhoto) -> Unit = {},
     imageProvider: (chosenPhoto: ChosenPhoto, maxImages: Int) -> List<Uri>,
 ) {
     val keyProvider = photos.itemKey { it.uri }
@@ -90,6 +93,7 @@ fun GalleryChosenPhotoGrid(
         contentPadding,
         checkedItemIds,
         onCheckedToggled,
+        onToggleEnabled,
         imageProvider
     )
 }
@@ -103,6 +107,7 @@ fun GalleryChosenPhotoGrid(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     checkedItemIds: Set<Long> = emptySet(),
     onCheckedToggled: (ChosenPhoto) -> Unit = {},
+    onToggleEnabled: (ChosenPhoto) -> Unit = {},
     imageProvider: (ChosenPhoto, Int) -> List<Uri>,
 ) {
     var lastTouchInfo by remember { mutableStateOf<TouchInfo?>(null) }
@@ -133,6 +138,7 @@ fun GalleryChosenPhotoGrid(
                     },
                 checked = isChecked,
                 touchLocation = if (lastTouchInfo?.photo == photo) lastTouchInfo?.offset else null,
+                onToggleEnabled = { onToggleEnabled(photo) },
                 imageProvider = imageProvider
             )
         }
