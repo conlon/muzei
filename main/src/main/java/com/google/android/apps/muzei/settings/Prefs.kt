@@ -60,14 +60,25 @@ object Prefs {
     const val EFFECT_MODE_BLUR = "blur"
     const val EFFECT_MODE_MOSAIC = "mosaic"
     const val MOSAIC_SHAPE_SQUARE = "square"
-    const val MOSAIC_SHAPE_TRIANGLE = "triangle"
+    const val MOSAIC_SHAPE_EQUILATERAL = "equilateral"
+    const val MOSAIC_SHAPE_IRREGULAR = "irregular"
     const val MOSAIC_SHAPE_HEXAGON = "hexagon"
+    const val MOSAIC_SHAPE_CIRCLE = "circle"
     const val MOSAIC_SHAPE_RANDOM = "random"
+    // Legacy shape values kept for migration only
+    const val MOSAIC_SHAPE_TRIANGLE = "triangle"
     const val MOSAIC_SHAPE_MIXED1 = "mixed1"
     const val MOSAIC_SHAPE_MIXED2 = "mixed2"
     const val MOSAIC_SHAPE_MIXED3 = "mixed3"
     const val MOSAIC_SHAPE_MIXED4 = "mixed4"
     const val MOSAIC_SHAPE_GLITCH = "glitch"
+    const val PREF_MOSAIC_FILTER = "mosaic_filter"
+    const val PREF_LOCK_MOSAIC_FILTER = "lock_mosaic_filter"
+    const val MOSAIC_FILTER_NONE = "none"
+    const val MOSAIC_FILTER_RAINDROP = "raindrop"
+    const val MOSAIC_FILTER_GLITCH1 = "glitch1"
+    const val MOSAIC_FILTER_GLITCH2 = "glitch2"
+    const val MOSAIC_FILTER_RECURSIVE = "recursive"
     const val PREF_GLITCH_H_DISPLACEMENT = "glitch_h_displacement"
     const val PREF_LOCK_GLITCH_H_DISPLACEMENT = "lock_glitch_h_displacement"
     const val PREF_GLITCH_V_DISPLACEMENT = "glitch_v_displacement"
@@ -81,6 +92,7 @@ object Prefs {
 
     private const val WALLPAPER_PREFERENCES_NAME = "wallpaper_preferences"
     private const val PREF_MIGRATED = "migrated_from_default"
+    private const val PREF_MOSAIC_FILTER_MIGRATED = "mosaic_filter_migrated"
 
     @Synchronized
     fun getSharedPreferences(context: Context): SharedPreferences {
@@ -131,7 +143,34 @@ object Prefs {
                     remove(PREF_DISABLE_BLUR_WHEN_LOCKED)
                 }
             }
+            if (!sp.getBoolean(PREF_MOSAIC_FILTER_MIGRATED, false)) {
+                sp.edit {
+                    migrateMosaicShapeToFilter(sp, PREF_MOSAIC_SHAPE, PREF_MOSAIC_FILTER)
+                    migrateMosaicShapeToFilter(sp, PREF_LOCK_MOSAIC_SHAPE, PREF_LOCK_MOSAIC_FILTER)
+                    putBoolean(PREF_MOSAIC_FILTER_MIGRATED, true)
+                }
+            }
         }
+    }
+
+    private fun SharedPreferences.Editor.migrateMosaicShapeToFilter(
+        sp: SharedPreferences,
+        shapePrefKey: String,
+        filterPrefKey: String,
+    ) {
+        val oldShape = sp.getString(shapePrefKey, MOSAIC_SHAPE_SQUARE) ?: MOSAIC_SHAPE_SQUARE
+        val (newShape, newFilter) = when (oldShape) {
+            MOSAIC_SHAPE_TRIANGLE  -> MOSAIC_SHAPE_EQUILATERAL to MOSAIC_FILTER_NONE
+            MOSAIC_SHAPE_MIXED1    -> MOSAIC_SHAPE_SQUARE      to MOSAIC_FILTER_RECURSIVE
+            MOSAIC_SHAPE_MIXED2    -> MOSAIC_SHAPE_CIRCLE      to MOSAIC_FILTER_RAINDROP
+            MOSAIC_SHAPE_MIXED3    -> MOSAIC_SHAPE_IRREGULAR   to MOSAIC_FILTER_NONE
+            MOSAIC_SHAPE_MIXED4    -> MOSAIC_SHAPE_IRREGULAR   to MOSAIC_FILTER_RAINDROP
+            MOSAIC_SHAPE_GLITCH    -> MOSAIC_SHAPE_SQUARE      to MOSAIC_FILTER_GLITCH1
+            MOSAIC_SHAPE_RANDOM    -> MOSAIC_SHAPE_SQUARE      to MOSAIC_FILTER_NONE
+            else                   -> oldShape                 to MOSAIC_FILTER_NONE
+        }
+        putString(shapePrefKey, newShape)
+        putString(filterPrefKey, newFilter)
     }
 
     private fun migratePreferences(source: SharedPreferences, destination: SharedPreferences) {

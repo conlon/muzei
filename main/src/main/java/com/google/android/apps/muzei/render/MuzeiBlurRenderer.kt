@@ -38,6 +38,7 @@ import com.google.android.apps.muzei.util.TickingFloatAnimator
 import com.google.android.apps.muzei.util.constrain
 import com.google.android.apps.muzei.util.floorEven
 import com.google.android.apps.muzei.util.interpolate
+import com.google.android.apps.muzei.util.MosaicFilter
 import com.google.android.apps.muzei.util.MosaicShape
 import com.google.android.apps.muzei.util.mosaicBitmap
 import com.google.android.apps.muzei.util.roundMult4
@@ -87,6 +88,7 @@ class MuzeiBlurRenderer(
         const val DEFAULT_GLITCH_PIXEL_SORT = 250    // max 500
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
         const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
+        const val DEFAULT_MOSAIC_FILTER = Prefs.MOSAIC_FILTER_NONE
         private const val DEMO_BLUR = 250
         private const val DEMO_DIM = 64
         private const val DEMO_GREY = 0
@@ -109,6 +111,7 @@ class MuzeiBlurRenderer(
     private var glitchPixelSort: Int = DEFAULT_GLITCH_PIXEL_SORT
     private var currentEffectMode: String = DEFAULT_EFFECT_MODE
     private var currentMosaicShape: MosaicShape = MosaicShape.SQUARE
+    private var currentMosaicFilter: MosaicFilter = MosaicFilter.NONE
     private var mosaicRandom: Boolean = false
 
     // Model and view matrices. Projection and MVP stored in picture set
@@ -148,6 +151,7 @@ class MuzeiBlurRenderer(
     private var glitchPixelSortPreferenceName = Prefs.PREF_GLITCH_PIXEL_SORT
     private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
     private var mosaicShapePreferenceName = Prefs.PREF_MOSAIC_SHAPE
+    private var mosaicFilterPreferenceName = Prefs.PREF_MOSAIC_FILTER
     private var blurRelatedToArtDetailMode = false
     private val blurInterpolator = AccelerateDecelerateInterpolator()
     private val blurAnimator = TickingFloatAnimator(BLUR_ANIMATION_DURATION * if (demoMode) 5 else 1)
@@ -173,6 +177,7 @@ class MuzeiBlurRenderer(
         recomputeGlitchPixelSort()
         recomputeEffectMode()
         recomputeMosaicShape()
+        recomputeMosaicFilter()
     }
 
     fun recomputeMaxPrescaledBlurPixels(
@@ -286,14 +291,28 @@ class MuzeiBlurRenderer(
                 ?: DEFAULT_MOSAIC_SHAPE
         mosaicRandom = raw == Prefs.MOSAIC_SHAPE_RANDOM
         currentMosaicShape = when (raw) {
-            Prefs.MOSAIC_SHAPE_TRIANGLE -> MosaicShape.TRIANGLE
-            Prefs.MOSAIC_SHAPE_HEXAGON -> MosaicShape.HEXAGON
-            Prefs.MOSAIC_SHAPE_MIXED1 -> MosaicShape.MIXED1
-            Prefs.MOSAIC_SHAPE_MIXED2 -> MosaicShape.MIXED2
-            Prefs.MOSAIC_SHAPE_MIXED3 -> MosaicShape.MIXED3
-            Prefs.MOSAIC_SHAPE_MIXED4 -> MosaicShape.MIXED4
-            Prefs.MOSAIC_SHAPE_GLITCH -> MosaicShape.GLITCH
-            else -> MosaicShape.SQUARE
+            Prefs.MOSAIC_SHAPE_EQUILATERAL -> MosaicShape.EQUILATERAL
+            Prefs.MOSAIC_SHAPE_IRREGULAR   -> MosaicShape.IRREGULAR
+            Prefs.MOSAIC_SHAPE_HEXAGON     -> MosaicShape.HEXAGON
+            Prefs.MOSAIC_SHAPE_CIRCLE      -> MosaicShape.CIRCLE
+            Prefs.MOSAIC_SHAPE_RANDOM      -> MosaicShape.RANDOM
+            else                           -> MosaicShape.SQUARE
+        }
+    }
+
+    fun recomputeMosaicFilter(
+            newMosaicFilterPreferenceName: String = mosaicFilterPreferenceName
+    ) {
+        mosaicFilterPreferenceName = newMosaicFilterPreferenceName
+        val raw = Prefs.getSharedPreferences(context)
+                .getString(mosaicFilterPreferenceName, DEFAULT_MOSAIC_FILTER)
+                ?: DEFAULT_MOSAIC_FILTER
+        currentMosaicFilter = when (raw) {
+            Prefs.MOSAIC_FILTER_RAINDROP  -> MosaicFilter.RAINDROP
+            Prefs.MOSAIC_FILTER_GLITCH1   -> MosaicFilter.GLITCH1
+            Prefs.MOSAIC_FILTER_GLITCH2   -> MosaicFilter.GLITCH2
+            Prefs.MOSAIC_FILTER_RECURSIVE -> MosaicFilter.RECURSIVE
+            else                          -> MosaicFilter.NONE
         }
     }
 
@@ -516,8 +535,10 @@ class MuzeiBlurRenderer(
                                 "was too large, trying a sample size of $sampleSize")
                     }
                 } while (!success)
+                val isGlitchFilter = currentMosaicFilter == MosaicFilter.GLITCH1 ||
+                        currentMosaicFilter == MosaicFilter.GLITCH2
                 val mosaicActive = currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&
-                        mosaicAmount > 0
+                        (mosaicAmount > 0 || isGlitchFilter)
                 val blurActive = currentEffectMode == Prefs.EFFECT_MODE_BLUR &&
                         maxPrescaledBlurPixels > 0
                 if (!mosaicActive && !blurActive && maxGrey == 0) {
@@ -555,7 +576,7 @@ class MuzeiBlurRenderer(
                             } else {
                                 currentMosaicShape
                             }
-                            generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape)
+                            generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape, currentMosaicFilter)
                         } else {
                             generateBlurKeyframes(scaledBitmap)
                         }
@@ -757,11 +778,12 @@ class MuzeiBlurRenderer(
             scaledBitmap: android.graphics.Bitmap,
             scaledHeight: Int,
             effectiveShape: MosaicShape,
+            effectiveFilter: MosaicFilter,
         ) {
             val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
-                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape,
+                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape, effectiveFilter,
                         glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
 
                 // Blend the mosaic over the (original) scaled photo when opacity < 500.

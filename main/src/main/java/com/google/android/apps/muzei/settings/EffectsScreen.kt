@@ -74,6 +74,7 @@ fun EffectsScreen(
     mosaicPref: String,
     mosaicOpacityPref: String,
     mosaicShapePref: String,
+    mosaicFilterPref: String,
     glitchHDisplacementPref: String = Prefs.PREF_GLITCH_H_DISPLACEMENT,
     glitchVDisplacementPref: String = Prefs.PREF_GLITCH_V_DISPLACEMENT,
     glitchChannelSplitPref: String = Prefs.PREF_GLITCH_CHANNEL_SPLIT,
@@ -106,6 +107,9 @@ fun EffectsScreen(
     )
     val mosaicShape = rememberPreferenceSourcedStringValue(
         prefs, mosaicShapePref, MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE
+    )
+    val mosaicFilter = rememberPreferenceSourcedStringValue(
+        prefs, mosaicFilterPref, MuzeiBlurRenderer.DEFAULT_MOSAIC_FILTER
     )
     val parallax = parallaxPref?.let {
         rememberPreferenceSourcedValue(prefs, it, Prefs.DEFAULT_PARALLAX)
@@ -142,6 +146,8 @@ fun EffectsScreen(
         onGlitchPixelSortChangeFinished = { glitchPixelSort.userControlled = false },
         mosaicShape = mosaicShape.value,
         onMosaicShapeChange = { mosaicShape.value = it },
+        mosaicFilter = mosaicFilter.value,
+        onMosaicFilterChange = { mosaicFilter.value = it },
         dim = dim.value,
         onDimChange = { dim.value = it },
         onDimChangeFinished = { dim.userControlled = false },
@@ -187,6 +193,8 @@ fun EffectsScreen(
     onGlitchPixelSortChangeFinished: (() -> Unit) = {},
     mosaicShape: String,
     onMosaicShapeChange: (String) -> Unit,
+    mosaicFilter: String = MuzeiBlurRenderer.DEFAULT_MOSAIC_FILTER,
+    onMosaicFilterChange: (String) -> Unit = {},
     dim: Int,
     onDimChange: (Int) -> Unit,
     onDimChangeFinished: (() -> Unit),
@@ -234,11 +242,18 @@ fun EffectsScreen(
                     .fillMaxWidth()
                     .padding(bottom = 8.dp),
             )
+            MosaicFilterSelector(
+                filter = mosaicFilter,
+                onFilterChange = onMosaicFilterChange,
+                modifier = contentModifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+            )
         }
         EffectsGrid(
             modifier = contentModifier,
             effectMode = effectMode,
-            mosaicShape = mosaicShape,
+            mosaicFilter = mosaicFilter,
             blur = blur,
             onBlurChange = onBlurChange,
             onBlurChangeFinished = onBlurChangeFinished,
@@ -338,19 +353,12 @@ private fun MosaicShapeSelector(
     onShapeChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Basic shapes (row 1) and experimental/mixed shapes (row 2, with "Circles").
-    val basicOptions = listOf(
-        Prefs.MOSAIC_SHAPE_SQUARE to R.string.settings_mosaic_shape_square,
-        Prefs.MOSAIC_SHAPE_TRIANGLE to R.string.settings_mosaic_shape_triangle,
-        Prefs.MOSAIC_SHAPE_HEXAGON to R.string.settings_mosaic_shape_hexagon,
-        Prefs.MOSAIC_SHAPE_RANDOM to R.string.settings_mosaic_shape_random,
-    )
-    val experimentalOptions = listOf(
-        Prefs.MOSAIC_SHAPE_MIXED2 to R.string.settings_mosaic_shape_mixed2,  // "Circles"
-        Prefs.MOSAIC_SHAPE_MIXED1 to R.string.settings_mosaic_shape_mixed1,
-        Prefs.MOSAIC_SHAPE_MIXED3 to R.string.settings_mosaic_shape_mixed3,
-        Prefs.MOSAIC_SHAPE_MIXED4 to R.string.settings_mosaic_shape_mixed4,
-        Prefs.MOSAIC_SHAPE_GLITCH to R.string.settings_mosaic_shape_glitch,
+    val options = listOf(
+        Prefs.MOSAIC_SHAPE_SQUARE      to R.string.settings_mosaic_shape_square,
+        Prefs.MOSAIC_SHAPE_EQUILATERAL to R.string.settings_mosaic_shape_equilateral,
+        Prefs.MOSAIC_SHAPE_IRREGULAR   to R.string.settings_mosaic_shape_irregular,
+        Prefs.MOSAIC_SHAPE_HEXAGON     to R.string.settings_mosaic_shape_hexagon,
+        Prefs.MOSAIC_SHAPE_CIRCLE      to R.string.settings_mosaic_shape_circle,
     )
 
     @Composable
@@ -374,17 +382,52 @@ private fun MosaicShapeSelector(
         )
     }
 
-    Column(modifier = modifier) {
-        FlowRow { basicOptions.forEach { (v, l) -> ShapeChip(v, l) } }
-        FlowRow { experimentalOptions.forEach { (v, l) -> ShapeChip(v, l) } }
+    FlowRow(modifier = modifier) { options.forEach { (v, l) -> ShapeChip(v, l) } }
+}
+
+@Composable
+private fun MosaicFilterSelector(
+    filter: String,
+    onFilterChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        Prefs.MOSAIC_FILTER_NONE      to R.string.settings_mosaic_filter_none,
+        Prefs.MOSAIC_FILTER_RAINDROP  to R.string.settings_mosaic_filter_raindrop,
+        Prefs.MOSAIC_FILTER_GLITCH1   to R.string.settings_mosaic_filter_glitch1,
+        Prefs.MOSAIC_FILTER_GLITCH2   to R.string.settings_mosaic_filter_glitch2,
+        Prefs.MOSAIC_FILTER_RECURSIVE to R.string.settings_mosaic_filter_recursive,
+    )
+
+    @Composable
+    fun FilterChipItem(value: String, label: Int) {
+        FilterChip(
+            selected = filter == value,
+            onClick = { onFilterChange(value) },
+            label = { Text(text = stringResource(label)) },
+            colors = FilterChipDefaults.filterChipColors(
+                containerColor = Color.Transparent,
+                labelColor = Color.White,
+                selectedContainerColor = Color.White.copy(alpha = 0.18f),
+                selectedLabelColor = Color.White,
+            ),
+            border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = filter == value,
+                borderColor = Color.White.copy(alpha = 0.5f),
+                selectedBorderColor = Color.White,
+            ),
+        )
     }
+
+    FlowRow(modifier = modifier) { options.forEach { (v, l) -> FilterChipItem(v, l) } }
 }
 
 @Composable
 private fun EffectsGrid(
     modifier: Modifier = Modifier,
     effectMode: String = MuzeiBlurRenderer.DEFAULT_EFFECT_MODE,
-    mosaicShape: String = MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE,
+    mosaicFilter: String = MuzeiBlurRenderer.DEFAULT_MOSAIC_FILTER,
     blur: Int = MuzeiBlurRenderer.DEFAULT_BLUR,
     onBlurChange: (Int) -> Unit = {},
     onBlurChangeFinished: (() -> Unit) = {},
@@ -425,7 +468,7 @@ private fun EffectsGrid(
         inactiveTrackColor = Color.DarkGray,
     )
     val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
-    val isGlitch = isMosaic && mosaicShape == Prefs.MOSAIC_SHAPE_GLITCH
+    val isGlitch = isMosaic && (mosaicFilter == Prefs.MOSAIC_FILTER_GLITCH1 || mosaicFilter == Prefs.MOSAIC_FILTER_GLITCH2)
     val showParallax = parallax != null && onParallaxChange != null
     val showFavoriteBoost = favoriteBoost != null && onFavoriteBoostChange != null
     val rowCount = 3 + (if (isMosaic) 1 else 0) + (if (isGlitch) 4 else 0) + (if (showParallax) 1 else 0) + (if (showFavoriteBoost) 1 else 0)
@@ -666,6 +709,7 @@ fun EffectsScreenPreview() {
         var blur by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_BLUR) }
         var mosaic by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC) }
         var mosaicShape by remember { mutableStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC_SHAPE) }
+        var mosaicFilter by remember { mutableStateOf(MuzeiBlurRenderer.DEFAULT_MOSAIC_FILTER) }
         var dim by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_MAX_DIM) }
         var grey by remember { mutableIntStateOf(MuzeiBlurRenderer.DEFAULT_GREY) }
         EffectsScreen(
@@ -679,6 +723,8 @@ fun EffectsScreenPreview() {
             onMosaicChangeFinished = {},
             mosaicShape = mosaicShape,
             onMosaicShapeChange = { mosaicShape = it },
+            mosaicFilter = mosaicFilter,
+            onMosaicFilterChange = { mosaicFilter = it },
             dim = dim,
             onDimChange = { dim = it },
             onDimChangeFinished = {},

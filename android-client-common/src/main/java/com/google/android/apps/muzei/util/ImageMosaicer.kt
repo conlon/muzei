@@ -30,20 +30,38 @@ import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class MosaicShape { SQUARE, TRIANGLE, HEXAGON, MIXED1, MIXED2, MIXED3, MIXED4, GLITCH }
+// Shape primitives (row 1 in UI). RANDOM kept in logic only, not shown in UI chips.
+enum class MosaicShape { SQUARE, EQUILATERAL, IRREGULAR, HEXAGON, CIRCLE, RANDOM }
+
+// Filters (row 2 in UI). Applied on top of any shape.
+// Salt assignments:
+//   0-2  : RECURSIVE subdivision (gate / 2×2-vs-3×3 / secondary)
+//   3-5  : RAINDROP circles (jitter-x / jitter-y / radius)
+//   6-7  : IRREGULAR base vertex jitter (x / y)
+//   8-9  : IRREGULAR raindrop vertex jitter (x / y)
+//   10-12: unused (were GLITCH internal recursive-block base)
+//   13   : GLITCH1 H-displacement bands
+//   14   : GLITCH1+GLITCH2 pixel sort
+//   15   : GLITCH1+GLITCH2 channel-split H-bands
+//   16   : GLITCH1 V-displacement bands
+//   17   : GLITCH1+GLITCH2 channel-split V-bands
+//   18   : GLITCH2 edge-weighted H-displacement
+//   19   : GLITCH2 edge-weighted V-displacement
+enum class MosaicFilter { NONE, RAINDROP, GLITCH1, GLITCH2, RECURSIVE }
 
 /**
- * Produce a mosaic of [source] using tiles of [shape], each roughly [tileSizePx] pixels
- * across. Square tiles use a bilinear downscale + nearest-neighbour upscale fast path;
- * triangle and hexagon tiles enumerate polygons and fill each with the source colour
- * sampled at the tile centroid.
+ * Two-stage mosaic pipeline:
+ *   Stage 1 — build the shape base (a tiling of [source] in the chosen [shape] primitive).
+ *   Stage 2 — apply [filter] to that base.
  *
- * Returns null if [source] is null or has zero area. Callers own the returned bitmap.
+ * GLITCH1/GLITCH2 filters bypass the tile≤1 early-return so they run even at minimum tile
+ * size (the shape base collapses to a copy of source, but the glitch passes still execute).
  */
 fun mosaicBitmap(
     source: Bitmap?,
     tileSizePx: Int,
     shape: MosaicShape = MosaicShape.SQUARE,
+    filter: MosaicFilter = MosaicFilter.NONE,
     glitchHDisplacement: Int = 250,
     glitchVDisplacement: Int = 250,
     glitchChannelSplit: Int = 250,
@@ -51,19 +69,33 @@ fun mosaicBitmap(
 ): Bitmap? {
     if (source == null || source.width == 0 || source.height == 0) return null
     val tile = max(1, tileSizePx)
-    if (tile <= 1) {
+    val isGlitch = filter == MosaicFilter.GLITCH1 || filter == MosaicFilter.GLITCH2
+    if (tile <= 1 && !isGlitch) {
         return source.copy(source.config ?: Bitmap.Config.ARGB_8888, true)
     }
-    return when (shape) {
-        MosaicShape.SQUARE -> squareMosaic(source, tile)
-        MosaicShape.TRIANGLE -> triangleMosaic(source, tile)
-        MosaicShape.HEXAGON -> hexagonMosaic(source, tile)
-        MosaicShape.MIXED1 -> mixed1Mosaic(source, tile)
-        MosaicShape.MIXED2 -> mixed2Mosaic(source, tile)
-        MosaicShape.MIXED3 -> mixed3Mosaic(source, tile)
-        MosaicShape.MIXED4 -> mixed4Mosaic(source, tile)
-        MosaicShape.GLITCH -> glitchMosaic(source, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+    // RAINDROP and RECURSIVE are self-contained (don't need a separate shape-base step).
+    if (filter == MosaicFilter.RAINDROP) return raindropMosaic(source, tile, shape)
+    if (filter == MosaicFilter.RECURSIVE) return recursiveMosaic(source, tile, shape)
+
+    // Stage 1: shape base
+    val base = shapeBaseMosaic(source, tile, shape)
+
+    // Stage 2: filter
+    return when (filter) {
+        MosaicFilter.NONE -> base
+        MosaicFilter.GLITCH1 -> glitch1Filter(base, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+        MosaicFilter.GLITCH2 -> glitch2Filter(base, source, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+        else -> base
     }
+}
+
+private fun shapeBaseMosaic(source: Bitmap, tile: Int, shape: MosaicShape): Bitmap = when (shape) {
+    MosaicShape.SQUARE     -> squareMosaic(source, tile)
+    MosaicShape.EQUILATERAL -> triangleMosaic(source, tile)
+    MosaicShape.IRREGULAR  -> irregularMosaic(source, tile)
+    MosaicShape.HEXAGON    -> hexagonMosaic(source, tile)
+    MosaicShape.CIRCLE     -> circleMosaicBase(source, tile)
+    MosaicShape.RANDOM     -> squareMosaic(source, tile)
 }
 
 private fun squareMosaic(source: Bitmap, tile: Int): Bitmap {
@@ -245,24 +277,53 @@ private fun hexagonMosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed1: edge-aware sparse recursive square subdivision. Subdivision is gated on
- * local image smoothness — cells whose luminance gradient is below [EDGE_THRESHOLD]
- * (i.e. flat, low-detail areas) may subdivide; cells crossing an edge stay as a
- * single whole tile. This concentrates the glitch-art recursive blocks in smooth
- * regions and leaves edges crisp, enhancing the glitch-art look.
+ * Circle mosaic base (CIRCLE shape, NONE filter). Draws a regular grid of opaque
+ * circles on a bilinear-blurred base layer. The blurred base fills the inter-circle
+ * gaps so the background is a soft version of the source rather than black.
+ */
+private fun circleMosaicBase(source: Bitmap, tile: Int): Bitmap {
+    val tileF = tile.toFloat()
+    val sW = source.width; val sH = source.height
+    val baseW = max(1, sW / tile); val baseH = max(1, sH / tile)
+    val base = source.scale(baseW, baseH, filter = true)
+    val (out, canvas) = newCanvasBitmap(source)
+    val blitPaint = Paint().apply { isFilterBitmap = true }
+    canvas.drawBitmap(base, Rect(0, 0, baseW, baseH), Rect(0, 0, sW, sH), blitPaint)
+    if (base != source) base.recycle()
+    val sampler = PixelSampler(source)
+    val circlePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+    val r = tileF * 0.5f
+    val colMin = -1; val colMax = ceil(sW.toFloat() / tileF).toInt() + 1
+    val rowMin = -1; val rowMax = ceil(sH.toFloat() / tileF).toInt() + 1
+    for (row in rowMin..rowMax) {
+        for (col in colMin..colMax) {
+            val cx = col * tileF + tileF * 0.5f
+            val cy = row * tileF + tileF * 0.5f
+            if (cx + r < 0 || cx - r > sW || cy + r < 0 || cy - r > sH) continue
+            circlePaint.color = sampler.sample(cx, cy) or (0xFF shl 24)
+            canvas.drawCircle(cx, cy, r, circlePaint)
+        }
+    }
+    return out
+}
+
+/**
+ * RECURSIVE filter dispatcher. For SQUARE, uses the classic edge-aware square
+ * subdivision (same look as old mixed1). For other shapes, uses the same square-grid
+ * subdivision logic but draws each cell/sub-cell as the chosen shape primitive.
+ */
+private fun recursiveMosaic(source: Bitmap, tile: Int, shape: MosaicShape): Bitmap =
+    recursiveMosaicImpl(source, tile, shape)
+
+/**
+ * Edge-aware recursive subdivision. The subdivision grid is always square; each cell
+ * is drawn using [shape]. Salts 0/1/2.
  *
- * Edge detection uses a cheap coarse pass: the source is downscaled to the cell grid
- * once (one bilinear-filtered scale), and each cell's gradient magnitude is the max
- * absolute luminance difference to its 4 neighbours. No per-pixel work on the full
- * image. Within the subdivision gate, all hash-driven 2×2 / 3×3 / secondary-split
- * decisions are unchanged from the non-edge-aware variant.
- *
- * [EDGE_THRESHOLD] ∈ [0,1]: lower → only flattest cells subdivide (more crisp edges,
- * fewer blocks); higher → more cells subdivide (closer to the non-edge-aware version).
+ * [EDGE_THRESHOLD] ∈ [0,1]: lower → only flattest cells subdivide.
  */
 private const val EDGE_THRESHOLD = 0.12f
 
-private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
+private fun recursiveMosaicImpl(source: Bitmap, tile: Int, shape: MosaicShape): Bitmap {
     val sampler = PixelSampler(source)
     val (out, canvas) = newCanvasBitmap(source)
     val paint = Paint().apply {
@@ -312,7 +373,7 @@ private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
             // 25% chance to subdivide (salt 0) — only when flat.
             if (!isFlat || hashUnit(col, row, 0) >= 0.25f) {
                 paint.color = sampler.sample(x0 + tileF / 2f, y0 + tileF / 2f)
-                canvas.drawRect(x0, y0, x0 + tileF, y0 + tileF, paint)
+                drawShapeInBounds(canvas, paint, shape, x0, y0, tileF, col, row)
                 continue
             }
             // Subdivide: 2×2 or 3×3 (salt 1).
@@ -332,12 +393,12 @@ private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
                                 val ssx0 = sx0 + ssc * ssW
                                 val ssy0 = sy0 + ssr * ssH
                                 paint.color = sampler.sample(ssx0 + ssW / 2f, ssy0 + ssH / 2f)
-                                canvas.drawRect(ssx0, ssy0, ssx0 + ssW, ssy0 + ssH, paint)
+                                drawShapeInBounds(canvas, paint, shape, ssx0, ssy0, ssW, col * 4 + sc, row * 4 + sr)
                             }
                         }
                     } else {
                         paint.color = sampler.sample(sx0 + subW / 2f, sy0 + subH / 2f)
-                        canvas.drawRect(sx0, sy0, sx0 + subW, sy0 + subH, paint)
+                        drawShapeInBounds(canvas, paint, shape, sx0, sy0, subW, col * 4 + sc, row * 4 + sr)
                     }
                 }
             }
@@ -347,13 +408,67 @@ private fun mixed1Mosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed2: translucent overlapping circles. A blurred base layer (bilinear
- * downscale → bilinear upscale) fills the canvas, then antialiased circles
- * at ~45% opacity are painted at jittered positions with varied radii. Overlapping
- * translucent discs blend (SRC_OVER) into combined colours, creating a soft
- * "colour blur" effect at circle intersections.
+ * Draw [shape] inside the square bounding box [x0, y0, x0+size, y0+size].
+ * [hashCol]/[hashRow] are used for IRREGULAR jitter only.
  */
-private fun mixed2Mosaic(source: Bitmap, tile: Int): Bitmap {
+private val _shapePath = Path()
+private fun drawShapeInBounds(
+    canvas: Canvas, paint: Paint, shape: MosaicShape,
+    x0: Float, y0: Float, size: Float,
+    hashCol: Int = 0, hashRow: Int = 0,
+) {
+    when (shape) {
+        MosaicShape.SQUARE, MosaicShape.RANDOM -> canvas.drawRect(x0, y0, x0 + size, y0 + size, paint)
+        MosaicShape.EQUILATERAL -> {
+            _shapePath.rewind()
+            _shapePath.moveTo(x0, y0 + size)
+            _shapePath.lineTo(x0 + size, y0 + size)
+            _shapePath.lineTo(x0 + size / 2f, y0)
+            _shapePath.close()
+            canvas.drawPath(_shapePath, paint)
+        }
+        MosaicShape.IRREGULAR -> {
+            val jitter = size * 0.25f
+            val apexX = x0 + size / 2f + (hashUnit(hashCol, hashRow, 6) - 0.5f) * jitter
+            val apexY = y0 + (hashUnit(hashCol, hashRow, 7) - 0.5f) * jitter
+            _shapePath.rewind()
+            _shapePath.moveTo(x0, y0 + size)
+            _shapePath.lineTo(x0 + size, y0 + size)
+            _shapePath.lineTo(apexX, apexY)
+            _shapePath.close()
+            canvas.drawPath(_shapePath, paint)
+        }
+        MosaicShape.HEXAGON -> {
+            val cx = x0 + size / 2f; val cy = y0 + size / 2f; val r = size / 2f
+            _shapePath.rewind()
+            _shapePath.moveTo(cx + r, cy)
+            for (k in 1..5) {
+                val angle = k * 60f * PI.toFloat() / 180f
+                _shapePath.lineTo(cx + r * cos(angle), cy + r * sin(angle))
+            }
+            _shapePath.close()
+            canvas.drawPath(_shapePath, paint)
+        }
+        MosaicShape.CIRCLE -> canvas.drawCircle(x0 + size / 2f, y0 + size / 2f, size / 2f, paint)
+    }
+}
+
+/**
+ * RAINDROP filter dispatcher. Blurred base + translucent oversized jittered shapes.
+ * CIRCLE and IRREGULAR use their original salt streams for fidelity with old looks.
+ * Square/equilateral/hexagon use salts 3-5 (same as circle, different visual due to different grid).
+ */
+private fun raindropMosaic(source: Bitmap, tile: Int, shape: MosaicShape): Bitmap = when (shape) {
+    MosaicShape.CIRCLE, MosaicShape.RANDOM -> circleRaindropMosaic(source, tile)
+    MosaicShape.IRREGULAR -> irregularRaindropMosaic(source, tile)
+    else -> genericRaindropMosaic(source, tile, shape)
+}
+
+/**
+ * Circle raindrop (CIRCLE+RAINDROP = old mixed2 look). Salts 3/4/5. Blurred base +
+ * translucent jittered circles at ~45% opacity with varied radii.
+ */
+private fun circleRaindropMosaic(source: Bitmap, tile: Int): Bitmap {
     val tileF = tile.toFloat()
     val sW = source.width; val sH = source.height
     val sWf = sW.toFloat(); val sHf = sH.toFloat()
@@ -392,14 +507,12 @@ private fun mixed2Mosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed3: irregular triangle mesh. An equilateral triangle lattice is rendered
- * with each vertex independently jittered (±30% of tile in x, ±30% of row-height
- * in y) via an avalanche hash. Because all three vertices of every shared edge use
- * the same hash function keyed on their grid coordinates, adjacent triangles share
- * identical jittered vertices — the mesh is watertight with no gaps or overlaps.
- * Each triangle is filled with the colour sampled at its (jittered) centroid.
+ * Irregular triangle mesh (IRREGULAR shape base). An equilateral triangle lattice
+ * is rendered with each vertex independently jittered (±30% of tile in x, ±30% of
+ * row-height in y) via an avalanche hash. Mesh is watertight — shared vertices
+ * compute identically. Salts 6/7.
  */
-private fun mixed3Mosaic(source: Bitmap, tile: Int): Bitmap {
+private fun irregularMosaic(source: Bitmap, tile: Int): Bitmap {
     val sampler = PixelSampler(source)
     val (out, canvas) = newCanvasBitmap(source)
     val paint = Paint().apply {
@@ -441,14 +554,10 @@ private fun mixed3Mosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Mixed4: translucent overlapping jittered triangle mesh. Forks [mixed3Mosaic]'s
- * irregular lattice, then draws each triangle expanded ~40% about its centroid so
- * adjacent triangles overlap. Triangles are drawn translucent (~50% alpha, antialiased)
- * over a bilinear-blurred base layer, exactly like [mixed2Mosaic]'s circles.
- * Overlapping translucent triangles blend (SRC_OVER) into combined colours — a soft
- * "colour blur" at every intersection.
+ * Irregular raindrop (IRREGULAR+RAINDROP = old mixed4 look). Salts 8/9 for vertex
+ * jitter. Blurred base + oversized expanded translucent triangles at ~50% opacity.
  */
-private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
+private fun irregularRaindropMosaic(source: Bitmap, tile: Int): Bitmap {
     val tileF = tile.toFloat()
     val sW = source.width; val sH = source.height
     val sWf = sW.toFloat(); val sHf = sH.toFloat()
@@ -517,158 +626,129 @@ private fun mixed4Mosaic(source: Bitmap, tile: Int): Bitmap {
 }
 
 /**
- * Glitch: datamosh variation of Mixed1's recursive-block subdivision. After rendering
- * the base recursive blocks (all cells, no edge gate), four glitch passes run on a
- * flat IntArray pixel buffer (no boxing — avoids GC spikes):
- *
- *   1. Horizontal band displacement — block shifts and scanline tears, with wrap-around
- *      and occasional frozen rows (sync-error streaks). Scaled by [hDisplacement].
- *   2. Vertical band displacement — same structure but along columns. Scaled by
- *      [vDisplacement]. Salt 16.
- *   3. Pixel sorting — a sparse subset of rows sorted by luminance, producing melted
- *      gradient streaks. Scaled by [pixelSort]. Salt 14.
- *   4. 2-D RGB channel split (chromatic aberration) — R and B channels sampled from
- *      offset (x,y) positions; horizontal bands (salt 15) and vertical bands (salt 17)
- *      independently randomise the offset magnitude. Scaled by [channelSplit].
- *
- * All three strengths are 0–500, where 250 is the design baseline and 0 fully disables
- * that technique. All randomness uses salts 10–17 (independent of other Mixed variants).
+ * Generic raindrop for SQUARE, EQUILATERAL, HEXAGON. Blurred base + translucent
+ * oversized jittered shapes drawn over it. Uses salts 3/4/5 for jitter/size, same
+ * as circle raindrop (different grid → independent visual). Alpha 0x73 (~45%).
  */
-private fun glitchMosaic(
-    source: Bitmap,
+private fun genericRaindropMosaic(source: Bitmap, tile: Int, shape: MosaicShape): Bitmap {
+    val tileF = tile.toFloat()
+    val sW = source.width; val sH = source.height
+    val sWf = sW.toFloat(); val sHf = sH.toFloat()
+    val baseW = max(1, sW / tile); val baseH = max(1, sH / tile)
+    val base = source.scale(baseW, baseH, filter = true)
+    val (out, canvas) = newCanvasBitmap(source)
+    val blitPaint = Paint().apply { isFilterBitmap = true }
+    canvas.drawBitmap(base, Rect(0, 0, baseW, baseH), Rect(0, 0, sW, sH), blitPaint)
+    if (base != source) base.recycle()
+    val sampler = PixelSampler(source)
+    val shapePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+    val path = Path()
+    val expand = 1.4f
+    val colMin = -2; val colMax = ceil(sWf / tileF).toInt() + 2
+    val rowMin = -2; val rowMax = ceil(sHf / tileF).toInt() + 2
+    for (row in rowMin..rowMax) {
+        for (col in colMin..colMax) {
+            val jx = (hashUnit(col, row, 3) - 0.5f) * tileF
+            val jy = (hashUnit(col, row, 4) - 0.5f) * tileF
+            val sizeScale = 0.4f + hashUnit(col, row, 5) * 0.6f
+            val cx = col * tileF + tileF * 0.5f + jx
+            val cy = row * tileF + tileF * 0.5f + jy
+            val effectiveSize = sizeScale * tileF * expand
+            if (cx + effectiveSize < 0 || cx - effectiveSize > sWf || cy + effectiveSize < 0 || cy - effectiveSize > sHf) continue
+            val rgb = sampler.sample(cx, cy) and 0x00FFFFFF
+            shapePaint.color = (0x73 shl 24) or rgb
+            when (shape) {
+                MosaicShape.SQUARE -> {
+                    val half = effectiveSize / 2f
+                    canvas.drawRect(cx - half, cy - half, cx + half, cy + half, shapePaint)
+                }
+                MosaicShape.EQUILATERAL -> {
+                    val h = effectiveSize * sqrt(3f) / 2f
+                    path.rewind()
+                    path.moveTo(cx - effectiveSize / 2f, cy + h / 3f)
+                    path.lineTo(cx + effectiveSize / 2f, cy + h / 3f)
+                    path.lineTo(cx, cy - 2f * h / 3f)
+                    path.close()
+                    canvas.drawPath(path, shapePaint)
+                }
+                MosaicShape.HEXAGON -> {
+                    val r = effectiveSize / 2f
+                    path.rewind()
+                    path.moveTo(cx + r, cy)
+                    for (k in 1..5) {
+                        val angle = k * 60f * PI.toFloat() / 180f
+                        path.lineTo(cx + r * cos(angle), cy + r * sin(angle))
+                    }
+                    path.close()
+                    canvas.drawPath(path, shapePaint)
+                }
+                else -> canvas.drawCircle(cx, cy, effectiveSize / 2f, shapePaint)
+            }
+        }
+    }
+    return out
+}
+
+/**
+ * Glitch: datamosh. After rendering the shape base in Stage 1, four glitch passes run
+ * on a flat IntArray pixel buffer:
+ *
+ *   1. Horizontal band displacement — block shifts and scanline tears. Salt 13.
+ *   2. Vertical band displacement. Salt 16.
+ *   3. Pixel sorting — sparse rows sorted by luminance. Salt 14.
+ *   4. 2-D RGB channel split (chromatic aberration). Salts 15/17.
+ *
+ * Salts 10-12 are retired (were used for the old internal recursive-block base).
+ * GLITCH1 uses band displacement (salts 13/16); GLITCH2 uses edge-weighted
+ * displacement (salts 18/19). Both share passes 3 and 4 (salts 14/15/17).
+ */
+/**
+ * GLITCH1 filter. Applies tile-anchored band displacement (salts 13/16), pixel
+ * sort (salt 14), and 2-D channel split (salts 15/17) to an already-rendered
+ * [base] bitmap. Stage 1 (recursive-block base) is replaced by the caller's
+ * shape base, so this function never re-tiles the source.
+ */
+private fun glitch1Filter(
+    base: Bitmap,
     tile: Int,
     hDisplacement: Int = 250,
     vDisplacement: Int = 250,
     channelSplit: Int = 250,
     pixelSort: Int = 250,
 ): Bitmap {
-    // ---- Normalised strengths [0.0, 1.0] per technique -------------------
-    val tdH = hDisplacement / 500f // horizontal displacement
-    val tdV = vDisplacement / 500f // vertical displacement
-    val tc = channelSplit / 500f   // chromatic aberration
-    val ts = pixelSort / 500f      // pixel sorting
-
-    // ---- Tunable constants (documented; scale with strength) -------------
-    /** Fraction of displacement bands that hold zero offset. */
-    val ZERO_BAND_FRAC   = 0.35f
-    /** Max horizontal displacement: fraction of image width. At tdH=0.5 → 0.25·sW. */
-    val DISP_H_MAX_FRAC  = tdH * 0.5f
-    /** Max vertical displacement: fraction of image height. At tdV=0.5 → 0.25·sH. */
-    val DISP_V_MAX_FRAC  = tdV * 0.5f
-    /** Fraction of displacement bands that are long block shifts (vs short tears). */
-    val BLOCK_BAND_FRAC  = 0.40f
-    /** Block-shift run length range (multiples of tile). */
-    val BLOCK_MIN_TILES  = 1; val BLOCK_MAX_TILES = 3
-    /** Scanline / column-tear run length range (rows or columns). */
+    val tdH = hDisplacement / 500f
+    val tdV = vDisplacement / 500f
+    val tc = channelSplit / 500f
+    val ts = pixelSort / 500f
+    val ZERO_BAND_FRAC  = 0.35f
+    val DISP_H_MAX_FRAC = tdH * 0.5f
+    val DISP_V_MAX_FRAC = tdV * 0.5f
+    val BLOCK_BAND_FRAC = 0.40f
+    val BLOCK_MIN_TILES = 1; val BLOCK_MAX_TILES = 3
     val TEAR_MIN = 1; val TEAR_MAX = 4
-    /** Per-row probability of a "frozen" (repeat-previous-row) sync-error glitch. */
-    val FROZEN_ROW_FRAC  = 0.03f
-    /** Fraction of rows sorted. At ts=0.5 → 0.15. */
-    val SORT_ROW_FRAC    = ts * 0.30f
-    /** Max pixel-sort run as a fraction of width. At ts=0.5 → 0.30. */
-    val SORT_MAX_FRAC    = ts * 0.60f
-    /** Minimum channel-split offset (px). At tc=0.5 → 4px. */
+    val FROZEN_ROW_FRAC = 0.03f
+    val SORT_ROW_FRAC   = ts * 0.30f
+    val SORT_MAX_FRAC   = ts * 0.60f
     val CA_MIN = (tc * 8f).toInt().coerceAtLeast(0)
-    /** Maximum channel-split offset (px). At tc=0.5 → 16px. */
     val CA_MAX = (tc * 32f).toInt().coerceAtLeast(CA_MIN)
-    // -----------------------------------------------------------------------
 
-    val sW = source.width
-    val sH = source.height
+    val sW = base.width; val sH = base.height
+    val buf = IntArray(sW * sH).also { base.getPixels(it, 0, sW, 0, 0, sW, sH) }
 
-    // ------------------------------------------------------------------
-    // Stage 1: Render the recursive-block base — same structure as
-    // mixed1Mosaic but without the edge-aware gate so the whole frame
-    // is busy. Salts 10, 11, 12.
-    // ------------------------------------------------------------------
-    val (out, canvas) = newCanvasBitmap(source)
-    val sampler = PixelSampler(source)
-    val paint = Paint().apply {
-        isAntiAlias = false
-        isDither = false
-        style = Paint.Style.FILL
-    }
-    val tileF = tile.toFloat()
-    val numCols = ceil(sW.toFloat() / tile).toInt() + 1
-    val numRows = ceil(sH.toFloat() / tile).toInt() + 1
-    for (row in -1..numRows) {
-        for (col in -1..numCols) {
-            val x0 = col * tileF
-            val y0 = row * tileF
-            // 25% chance to stay whole (salt 10).
-            if (hashUnit(col, row, 10) >= 0.25f) {
-                paint.color = sampler.sample(x0 + tileF / 2f, y0 + tileF / 2f)
-                canvas.drawRect(x0, y0, x0 + tileF, y0 + tileF, paint)
-                continue
-            }
-            // Subdivide into 2×2 or 3×3 (salt 11).
-            val n = if (hashUnit(col, row, 11) < 0.5f) 2 else 3
-            val subW = tileF / n
-            val subH = tileF / n
-            for (sr in 0 until n) {
-                for (sc in 0 until n) {
-                    val sx0 = x0 + sc * subW
-                    val sy0 = y0 + sr * subH
-                    // 25% chance to split sub-square into 2×2 (salt 12).
-                    if (hashUnit(col * 4 + sc, row * 4 + sr, 12) < 0.25f) {
-                        val ssW = subW / 2f
-                        val ssH = subH / 2f
-                        for (ssr in 0..1) {
-                            for (ssc in 0..1) {
-                                val ssx0 = sx0 + ssc * ssW
-                                val ssy0 = sy0 + ssr * ssH
-                                paint.color = sampler.sample(ssx0 + ssW / 2f, ssy0 + ssH / 2f)
-                                canvas.drawRect(ssx0, ssy0, ssx0 + ssW, ssy0 + ssH, paint)
-                            }
-                        }
-                    } else {
-                        paint.color = sampler.sample(sx0 + subW / 2f, sy0 + subH / 2f)
-                        canvas.drawRect(sx0, sy0, sx0 + subW, sy0 + subH, paint)
-                    }
-                }
-            }
-        }
-    }
-
-    // Flatten the rendered bitmap into a primitive pixel array for the remaining passes.
-    val buf = IntArray(sW * sH)
-    out.getPixels(buf, 0, sW, 0, 0, sW, sH)
-
-    // ------------------------------------------------------------------
-    // Stage 2a: Horizontal band displacement. Each band holds a fixed x-offset
-    // (content wraps around) for a run of rows. Long runs → block shifts;
-    // short runs → scanline tears. Occasional rows repeat the previous row
-    // (sync-error freeze). Salt 13.
-    // ------------------------------------------------------------------
-    val rowTmp  = IntArray(sW)
-    val prevRow = IntArray(sW)
-    var hasPrev = false
-    var hRunLeft = 0
-    var hOffset  = 0
-
+    // Stage 2a: H-band displacement. Salt 13.
+    val rowTmp = IntArray(sW); val prevRow = IntArray(sW)
+    var hasPrev = false; var hRunLeft = 0; var hOffset = 0
     for (y in 0 until sH) {
         if (hRunLeft <= 0) {
-            val h0 = hashUnit(y, 0, 13)   // zero-band gate
-            val h1 = hashUnit(y, 1, 13)   // block vs tear
-            val h2 = hashUnit(y, 2, 13)   // run-length fraction
-            val h3 = hashUnit(y, 3, 13)   // offset magnitude
-            val h4 = hashUnit(y, 4, 13)   // offset sign
+            val h0 = hashUnit(y, 0, 13); val h1 = hashUnit(y, 1, 13)
+            val h2 = hashUnit(y, 2, 13); val h3 = hashUnit(y, 3, 13); val h4 = hashUnit(y, 4, 13)
             val isBlock = h1 < BLOCK_BAND_FRAC
-            hRunLeft = if (isBlock) {
-                ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile)
-                    .coerceAtLeast(1)
-            } else {
-                (TEAR_MIN + (h2 * (TEAR_MAX - TEAR_MIN + 1)).toInt()).coerceAtLeast(1)
-            }
-            hOffset = if (h0 < ZERO_BAND_FRAC || DISP_H_MAX_FRAC <= 0f) {
-                0
-            } else {
-                val mag = (h3 * DISP_H_MAX_FRAC * sW).toInt()
-                if (h4 < 0.5f) mag else -mag
-            }
+            hRunLeft = if (isBlock) ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile).coerceAtLeast(1)
+                       else (TEAR_MIN + (h2 * (TEAR_MAX - TEAR_MIN + 1)).toInt()).coerceAtLeast(1)
+            hOffset = if (h0 < ZERO_BAND_FRAC || DISP_H_MAX_FRAC <= 0f) 0
+                      else { val mag = (h3 * DISP_H_MAX_FRAC * sW).toInt(); if (h4 < 0.5f) mag else -mag }
         }
         hRunLeft--
-
         val rowStart = y * sW
         val isFrozen = hasPrev && hashUnit(y, 5, 13) < FROZEN_ROW_FRAC
         if (isFrozen) {
@@ -679,43 +759,23 @@ private fun glitchMosaic(
             System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
             System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
         }
-        System.arraycopy(buf, rowStart, prevRow, 0, sW)
-        hasPrev = true
+        System.arraycopy(buf, rowStart, prevRow, 0, sW); hasPrev = true
     }
 
-    // ------------------------------------------------------------------
-    // Stage 2b: Vertical band displacement. Same structure as 2a but along
-    // columns — each column-band holds a fixed y-offset with wrap-around.
-    // Column reads and writes are strided (one element per sW step). Salt 16.
-    // ------------------------------------------------------------------
-    val colTmp = IntArray(sH)
-    var vRunLeft = 0
-    var vOffset  = 0
-
+    // Stage 2b: V-band displacement. Salt 16.
+    val colTmp = IntArray(sH); var vRunLeft = 0; var vOffset = 0
     for (x in 0 until sW) {
         if (vRunLeft <= 0) {
-            val h0 = hashUnit(x, 0, 16)
-            val h1 = hashUnit(x, 1, 16)
-            val h2 = hashUnit(x, 2, 16)
-            val h3 = hashUnit(x, 3, 16)
-            val h4 = hashUnit(x, 4, 16)
+            val h0 = hashUnit(x, 0, 16); val h1 = hashUnit(x, 1, 16)
+            val h2 = hashUnit(x, 2, 16); val h3 = hashUnit(x, 3, 16); val h4 = hashUnit(x, 4, 16)
             val isBlock = h1 < BLOCK_BAND_FRAC
-            vRunLeft = if (isBlock) {
-                ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile)
-                    .coerceAtLeast(1)
-            } else {
-                (TEAR_MIN + (h2 * (TEAR_MAX - TEAR_MIN + 1)).toInt()).coerceAtLeast(1)
-            }
-            vOffset = if (h0 < ZERO_BAND_FRAC || DISP_V_MAX_FRAC <= 0f) {
-                0
-            } else {
-                val mag = (h3 * DISP_V_MAX_FRAC * sH).toInt()
-                if (h4 < 0.5f) mag else -mag
-            }
+            vRunLeft = if (isBlock) ((BLOCK_MIN_TILES + (h2 * (BLOCK_MAX_TILES - BLOCK_MIN_TILES + 1)).toInt()) * tile).coerceAtLeast(1)
+                       else (TEAR_MIN + (h2 * (TEAR_MAX - TEAR_MIN + 1)).toInt()).coerceAtLeast(1)
+            vOffset = if (h0 < ZERO_BAND_FRAC || DISP_V_MAX_FRAC <= 0f) 0
+                      else { val mag = (h3 * DISP_V_MAX_FRAC * sH).toInt(); if (h4 < 0.5f) mag else -mag }
         }
         vRunLeft--
         if (vOffset != 0) {
-            // Read column x into scratch, shift, write back.
             for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
             val off = ((vOffset % sH) + sH) % sH
             for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
@@ -723,97 +783,164 @@ private fun glitchMosaic(
         }
     }
 
-    // ------------------------------------------------------------------
-    // Stage 3: Pixel sorting. A sparse subset of rows get one contiguous
-    // run sorted by luminance to produce melted gradient streaks.
-    // Encoding: (lum xor 0x80) in bits 31–24 maps 0..255 onto a
-    // monotonically increasing signed integer so IntArray.sort() gives
-    // ascending luminance order; position in bits 23–0. Salt 14.
-    // ------------------------------------------------------------------
-    val maxRun  = (sW * SORT_MAX_FRAC).toInt().coerceAtLeast(2)
-    val sortKey = IntArray(maxRun)
-    val sortPix = IntArray(maxRun)
+    applyPixelSort(buf, sW, sH, SORT_ROW_FRAC, SORT_MAX_FRAC)
+    val result = applyChannelSplit(buf, sW, sH, tile, CA_MIN, CA_MAX)
+    base.setPixels(result, 0, sW, 0, 0, sW, sH)
+    return base
+}
 
+/**
+ * GLITCH2 filter. Edge-weighted displacement (salts 18/19): bands with high
+ * edge magnitude are displaced more than flat bands. Followed by the same
+ * pixel sort (salt 14) and channel split (salts 15/17) as GLITCH1.
+ *
+ * [source] is used only for edge detection (thumbnail gradient); [base] is the
+ * shape-rendered bitmap that gets displaced.
+ */
+private fun glitch2Filter(
+    base: Bitmap,
+    source: Bitmap,
+    tile: Int,
+    hDisplacement: Int = 250,
+    vDisplacement: Int = 250,
+    channelSplit: Int = 250,
+    pixelSort: Int = 250,
+): Bitmap {
+    val tdH = hDisplacement / 500f
+    val tdV = vDisplacement / 500f
+    val tc = channelSplit / 500f
+    val ts = pixelSort / 500f
+    val SORT_ROW_FRAC = ts * 0.30f
+    val SORT_MAX_FRAC = ts * 0.60f
+    val CA_MIN = (tc * 8f).toInt().coerceAtLeast(0)
+    val CA_MAX = (tc * 32f).toInt().coerceAtLeast(CA_MIN)
+
+    val sW = base.width; val sH = base.height
+    val buf = IntArray(sW * sH).also { base.getPixels(it, 0, sW, 0, 0, sW, sH) }
+
+    // Build coarse edge map (same approach as recursiveMosaicImpl).
+    val numCols = ceil(sW.toFloat() / tile).toInt() + 1
+    val numRows = ceil(sH.toFloat() / tile).toInt() + 1
+    val mapW = numCols + 2; val mapH = numRows + 2
+    val thumb = source.scale(mapW, mapH, filter = true)
+    val thumbPx = IntArray(mapW * mapH).also { thumb.getPixels(it, 0, mapW, 0, 0, mapW, mapH) }
+    if (thumb != source) thumb.recycle()
+    fun lum(argb: Int): Float {
+        val r = (argb shr 16 and 0xFF) / 255f
+        val g = (argb shr 8  and 0xFF) / 255f
+        val b = (argb and 0xFF) / 255f
+        return 0.299f * r + 0.587f * g + 0.114f * b
+    }
+    fun edgeMag(col: Int, row: Int): Float {
+        val ci = (col + 1).coerceIn(0, mapW - 1)
+        val ri = (row + 1).coerceIn(0, mapH - 1)
+        val c = lum(thumbPx[ri * mapW + ci])
+        val dxL = if (ci > 0) kotlin.math.abs(c - lum(thumbPx[ri * mapW + ci - 1])) else 0f
+        val dxR = if (ci < mapW-1) kotlin.math.abs(c - lum(thumbPx[ri * mapW + ci + 1])) else 0f
+        val dyU = if (ri > 0) kotlin.math.abs(c - lum(thumbPx[(ri-1) * mapW + ci])) else 0f
+        val dyD = if (ri < mapH-1) kotlin.math.abs(c - lum(thumbPx[(ri+1) * mapW + ci])) else 0f
+        return maxOf(dxL, dxR, dyU, dyD)
+    }
+
+    // Per cell-row: max edge magnitude across all columns in that row.
+    val rowEdge = FloatArray(numRows + 2) { gridRow ->
+        (0 until numCols + 2).maxOf { gridCol -> edgeMag(gridCol - 1, gridRow - 1) }
+    }
+    // Per cell-column: max edge magnitude across all rows in that column.
+    val colEdge = FloatArray(numCols + 2) { gridCol ->
+        (0 until numRows + 2).maxOf { gridRow -> edgeMag(gridCol - 1, gridRow - 1) }
+    }
+
+    // Edge-weighted H-displacement (salt 18): rows in high-edge cell-rows displace more.
+    val rowTmp = IntArray(sW)
     for (y in 0 until sH) {
-        if (hashUnit(y, 0, 14) >= SORT_ROW_FRAC) continue
-        val h1     = hashUnit(y, 1, 14)
-        val h2     = hashUnit(y, 2, 14)
-        val runLen = (h1 * maxRun).toInt().coerceIn(2, maxRun)
-        val start  = (h2 * (sW - runLen)).toInt().coerceIn(0, sW - runLen)
+        val gridRow = (y / tile).coerceIn(0, rowEdge.size - 1)
+        val edgeW = rowEdge[gridRow]
+        val maxDisp = (edgeW * tdH * 0.5f + tdH * 0.05f) * sW
+        if (maxDisp < 1f) continue
+        val h0 = hashUnit(y, 0, 18); val h1 = hashUnit(y, 1, 18)
+        val offset = ((h0 - 0.5f) * 2f * maxDisp).toInt()
+        if (offset == 0) continue
+        if (h1 < 0.20f) continue  // 20% of rows frozen / unshifted for variety
+        val rowStart = y * sW
+        System.arraycopy(buf, rowStart, rowTmp, 0, sW)
+        val off = ((offset % sW) + sW) % sW
+        System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
+        System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
+    }
+
+    // Edge-weighted V-displacement (salt 19): columns in high-edge cell-columns displace more.
+    val colTmp = IntArray(sH)
+    for (x in 0 until sW) {
+        val gridCol = (x / tile).coerceIn(0, colEdge.size - 1)
+        val edgeW = colEdge[gridCol]
+        val maxDisp = (edgeW * tdV * 0.5f + tdV * 0.05f) * sH
+        if (maxDisp < 1f) continue
+        val h0 = hashUnit(x, 0, 19); val h1 = hashUnit(x, 1, 19)
+        val offset = ((h0 - 0.5f) * 2f * maxDisp).toInt()
+        if (offset == 0) continue
+        if (h1 < 0.20f) continue
+        for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
+        val off = ((offset % sH) + sH) % sH
+        for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
+        for (y in sH - off until sH) { buf[y * sW + x] = colTmp[y + off - sH] }
+    }
+
+    applyPixelSort(buf, sW, sH, SORT_ROW_FRAC, SORT_MAX_FRAC)
+    val result = applyChannelSplit(buf, sW, sH, tile, CA_MIN, CA_MAX)
+    base.setPixels(result, 0, sW, 0, 0, sW, sH)
+    return base
+}
+
+// Shared glitch sub-passes ---------------------------------------------------
+
+private fun applyPixelSort(buf: IntArray, sW: Int, sH: Int, sortRowFrac: Float, sortMaxFrac: Float) {
+    val maxRun = (sW * sortMaxFrac).toInt().coerceAtLeast(2)
+    val sortKey = IntArray(maxRun); val sortPix = IntArray(maxRun)
+    for (y in 0 until sH) {
+        if (hashUnit(y, 0, 14) >= sortRowFrac) continue
+        val runLen = (hashUnit(y, 1, 14) * maxRun).toInt().coerceIn(2, maxRun)
+        val start  = (hashUnit(y, 2, 14) * (sW - runLen)).toInt().coerceIn(0, sW - runLen)
         val base   = y * sW + start
         for (i in 0 until runLen) {
-            val px  = buf[base + i]
-            val r   = (px shr 16) and 0xFF
-            val g   = (px shr 8)  and 0xFF
-            val b   = px and 0xFF
-            val lum = (r * 77 + g * 150 + b * 29) ushr 8
-            sortPix[i] = px
-            sortKey[i] = ((lum xor 0x80) shl 24) or i
+            val px = buf[base + i]
+            val lum = ((px shr 16 and 0xFF) * 77 + (px shr 8 and 0xFF) * 150 + (px and 0xFF) * 29) ushr 8
+            sortPix[i] = px; sortKey[i] = ((lum xor 0x80) shl 24) or i
         }
         sortKey.sort(0, runLen)
-        for (d in 0 until runLen) {
-            buf[base + d] = sortPix[sortKey[d] and 0x00FFFFFF]
-        }
+        for (d in 0 until runLen) { buf[base + d] = sortPix[sortKey[d] and 0x00FFFFFF] }
     }
+}
 
-    // ------------------------------------------------------------------
-    // Stage 4: 2-D RGB channel split (chromatic aberration).
-    //   R sampled from (x−dRx, y−dRy);  B from (x+dBx, y+dBy);  G at (x,y).
-    // Horizontal offsets (dRx/dBx) from per-row bands (salt 15); vertical
-    // offsets (dRy/dBy) from per-column bands precomputed below (salt 17).
-    // All offsets range from CA_MIN (base) to CA_MAX (amplified bands).
-    // ------------------------------------------------------------------
-
-    // Precompute vertical CA offset per column (salt 17).
-    val colVDr = IntArray(sW)
-    val colVDb = IntArray(sW)
-    var cvLeft = 0; var cvDr = CA_MIN; var cvDb = CA_MIN
+private fun applyChannelSplit(buf: IntArray, sW: Int, sH: Int, tile: Int, caMin: Int, caMax: Int): IntArray {
+    val colVDr = IntArray(sW); val colVDb = IntArray(sW)
+    var cvLeft = 0; var cvDr = caMin; var cvDb = caMin
     for (x in 0 until sW) {
         if (cvLeft <= 0) {
-            val hv0 = hashUnit(x, 0, 17)
-            val hv1 = hashUnit(x, 1, 17)
-            val hv2 = hashUnit(x, 2, 17)
+            val hv0 = hashUnit(x, 0, 17); val hv1 = hashUnit(x, 1, 17); val hv2 = hashUnit(x, 2, 17)
             cvLeft = (1 + (hv0 * tile * 3f).toInt()).coerceAtLeast(1)
-            val vExtra = (hv1 * (CA_MAX - CA_MIN).toFloat()).toInt()
-            if (hv2 < 0.30f) { cvDr = CA_MIN; cvDb = CA_MIN }
-            else             { cvDr = CA_MIN + vExtra; cvDb = CA_MIN + vExtra }
+            val vExtra = (hv1 * (caMax - caMin).toFloat()).toInt()
+            if (hv2 < 0.30f) { cvDr = caMin; cvDb = caMin } else { cvDr = caMin + vExtra; cvDb = caMin + vExtra }
         }
-        cvLeft--
-        colVDr[x] = cvDr; colVDb[x] = cvDb
+        cvLeft--; colVDr[x] = cvDr; colVDb[x] = cvDb
     }
-
-    val out2   = IntArray(sW * sH)
-    var caLeft = 0
-    var caDr   = CA_MIN
-    var caDb   = CA_MIN
-
+    val out = IntArray(sW * sH)
+    var caLeft = 0; var caDr = caMin; var caDb = caMin
     for (y in 0 until sH) {
         if (caLeft <= 0) {
-            val h0 = hashUnit(y, 0, 15)
-            val h1 = hashUnit(y, 1, 15)
-            val h2 = hashUnit(y, 2, 15)
+            val h0 = hashUnit(y, 0, 15); val h1 = hashUnit(y, 1, 15); val h2 = hashUnit(y, 2, 15)
             caLeft = (1 + (h0 * tile * 3f).toInt()).coerceAtLeast(1)
-            val extra = (h1 * (CA_MAX - CA_MIN).toFloat()).toInt()
-            if (h2 < 0.30f) { caDr = CA_MIN; caDb = CA_MIN }
-            else             { caDr = CA_MIN + extra; caDb = CA_MIN + extra }
+            val extra = (h1 * (caMax - caMin).toFloat()).toInt()
+            if (h2 < 0.30f) { caDr = caMin; caDb = caMin } else { caDr = caMin + extra; caDb = caMin + extra }
         }
         caLeft--
         val rowStart = y * sW
         for (x in 0 until sW) {
-            val xR = (x - caDr).coerceIn(0, sW - 1)
-            val xB = (x + caDb).coerceIn(0, sW - 1)
-            val yR = (y - colVDr[x]).coerceIn(0, sH - 1)
-            val yB = (y + colVDb[x]).coerceIn(0, sH - 1)
-            val pr = buf[yR * sW + xR]
-            val pg = buf[rowStart + x]
-            val pb = buf[yB * sW + xB]
-            out2[rowStart + x] = 0xFF000000.toInt() or
-                    (pr and 0x00FF0000) or
-                    (pg and 0x0000FF00) or
-                    (pb and 0x000000FF)
+            val xR = (x - caDr).coerceIn(0, sW - 1); val xB = (x + caDb).coerceIn(0, sW - 1)
+            val yR = (y - colVDr[x]).coerceIn(0, sH - 1); val yB = (y + colVDb[x]).coerceIn(0, sH - 1)
+            out[rowStart + x] = 0xFF000000.toInt() or
+                (buf[yR * sW + xR] and 0x00FF0000) or (buf[rowStart + x] and 0x0000FF00) or (buf[yB * sW + xB] and 0x000000FF)
         }
     }
-
-    out.setPixels(out2, 0, sW, 0, 0, sW, sH)
     return out
 }
