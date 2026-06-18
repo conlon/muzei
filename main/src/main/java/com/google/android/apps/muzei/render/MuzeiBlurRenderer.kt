@@ -774,6 +774,40 @@ class MuzeiBlurRenderer(
             }
         }
 
+        /**
+         * Attempt to render a mosaic frame, falling back gracefully on failure.
+         *
+         * First try: full-resolution tile. On [Throwable] (incl. [OutOfMemoryError]),
+         * retry once with a doubled tile (half the output cells, far less memory).
+         * If the retry also fails, return null so the caller can fall back to
+         * [pictures][0] (the sharp original).
+         */
+        private fun tryMosaicBitmap(
+            source: android.graphics.Bitmap,
+            tilePx: Int,
+            shape: MosaicShape,
+            filter: MosaicFilter,
+            frameIndex: Int,
+        ): android.graphics.Bitmap? {
+            return try {
+                mosaicBitmap(source, tilePx, shape, filter,
+                    glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+            } catch (firstErr: Throwable) {
+                Log.e(TAG, "Mosaic frame $frameIndex failed (tile=$tilePx shape=$shape filter=$filter), retrying at 2× tile", firstErr)
+                // Retry: double the tile size to cut memory roughly in half; clamp
+                // glitch displacement to a safe mid-range so extreme values don't OOM.
+                val safeH = glitchHDisplacement.coerceAtMost(250)
+                val safeV = glitchVDisplacement.coerceAtMost(250)
+                try {
+                    mosaicBitmap(source, tilePx * 2, shape, filter,
+                        safeH, safeV, glitchChannelSplit, glitchPixelSort)
+                } catch (secondErr: Throwable) {
+                    Log.e(TAG, "Mosaic frame $frameIndex retry also failed; falling back to sharp photo", secondErr)
+                    null  // caller will use pictures[0]
+                }
+            }
+        }
+
         private fun generateMosaicKeyframes(
             scaledBitmap: android.graphics.Bitmap,
             scaledHeight: Int,
@@ -783,12 +817,17 @@ class MuzeiBlurRenderer(
             val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
-                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape, effectiveFilter,
-                        glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+                val pixelated = tryMosaicBitmap(scaledBitmap, tilePx, effectiveShape, effectiveFilter, f)
+
+                // If mosaic generation failed entirely, fall back to the sharp photo for this frame.
+                if (pixelated == null) {
+                    pictures[f] = pictures[0]
+                    continue
+                }
 
                 // Blend the mosaic over the (original) scaled photo when opacity < 500.
                 // This respects grey (desaturate step below) and dim (draw-time overlay).
-                val blended = if (mosaicOpacity < 500 && pixelated != null) {
+                val blended = if (mosaicOpacity < 500) {
                     val config = scaledBitmap.config ?: Bitmap.Config.ARGB_8888
                     val composite = Bitmap.createBitmap(scaledBitmap.width, scaledBitmap.height, config)
                     val compositeCanvas = Canvas(composite)
@@ -810,7 +849,7 @@ class MuzeiBlurRenderer(
                 }
 
                 val desaturateAmount = maxGrey / 500f * f / blurKeyframes
-                val finalBitmap = if (desaturateAmount > 0f && blended != null) {
+                val finalBitmap = if (desaturateAmount > 0f) {
                     val blurrer = ImageBlurrer(context, blended)
                     val out = blurrer.blurBitmap(0f, desaturateAmount)
                     blurrer.destroy()

@@ -43,7 +43,7 @@
     <string name="settings_glitch_h_displacement_title">H. Displacement</string>
     <string name="settings_glitch_v_displacement_title">V. Displacement</string>
     <string name="settings_glitch_channel_split_title">Channel split</string>
-    <string name="settings_glitch_pixel_sort_title">Pixel sorting</string>
+    <string name="settings_glitch_pixel_sort_title">Pixel tears</string>
 
     <string name="action_favorite">Favorite</string>
     <string name="action_unfavorite">Unfavorite</string>
