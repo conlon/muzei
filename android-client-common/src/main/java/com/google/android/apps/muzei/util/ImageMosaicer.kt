@@ -50,9 +50,12 @@ enum class MosaicShape { SQUARE, EQUILATERAL, IRREGULAR, HEXAGON, CIRCLE, RANDOM
 //   19   : GLITCH2 edge-weighted V-displacement
 //   20   : RECURSIVE triangle subdivision gate
 //   21   : RECURSIVE hexagon child count + corner placement
-//   22/23: GLITCH2 H pixel-tear Markov run / magnitude+sign
-//   24/25: GLITCH2 V pixel-tear Markov run / magnitude+sign
-//   26   : GLITCH2 pixel-tear band Markov run + window
+//   22   : GLITCH2 H chunk start / length / sign
+//   23   : GLITCH2 H per-row smear jitter
+//   24   : GLITCH2 V chunk start / length / sign
+//   25   : GLITCH2 V per-col smear jitter
+//   26   : GLITCH2 pixel-tear chunk start + length
+//   27   : GLITCH2 pixel-tear per-row band (run length + start)
 enum class MosaicFilter { NONE, RAINDROP, GLITCH1, GLITCH2, RECURSIVE }
 
 /**
@@ -1138,12 +1141,18 @@ private fun glitch2Filter(
                 if (hOffset != 0) {
                     val yStart = cr * tile
                     val yEnd = min((cr + lenCells) * tile, sH)
+                    // Per-row smear: each scanline shifts by hOffset ± jitter (salt 23).
+                    val smearAmp = max(1, (Math.abs(hOffset) * 0.20f).toInt())
                     for (y in yStart until yEnd) {
-                        val rowStart = y * sW
-                        System.arraycopy(buf, rowStart, rowTmp, 0, sW)
-                        val off = ((hOffset % sW) + sW) % sW
-                        System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
-                        System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
+                        val jitter = ((hashUnit(y, 0, 23) - 0.5f) * 2f * smearAmp).toInt()
+                        val rowOff = hOffset + jitter
+                        if (rowOff != 0) {
+                            val rowStart = y * sW
+                            System.arraycopy(buf, rowStart, rowTmp, 0, sW)
+                            val off = ((rowOff % sW) + sW) % sW
+                            System.arraycopy(rowTmp, off, buf, rowStart, sW - off)
+                            System.arraycopy(rowTmp, 0, buf, rowStart + sW - off, off)
+                        }
                     }
                 }
                 cr += lenCells
@@ -1168,11 +1177,17 @@ private fun glitch2Filter(
                 if (vOffset != 0) {
                     val xStart = cc * tile
                     val xEnd = min((cc + lenCells) * tile, sW)
+                    // Per-col smear: each column shifts by vOffset ± jitter (salt 25).
+                    val smearAmp = max(1, (Math.abs(vOffset) * 0.20f).toInt())
                     for (x in xStart until xEnd) {
-                        for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
-                        val off = ((vOffset % sH) + sH) % sH
-                        for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
-                        for (y in sH - off until sH) { buf[y * sW + x] = colTmp[y + off - sH] }
+                        val jitter = ((hashUnit(x, 0, 25) - 0.5f) * 2f * smearAmp).toInt()
+                        val colOff = vOffset + jitter
+                        if (colOff != 0) {
+                            for (y in 0 until sH) { colTmp[y] = buf[y * sW + x] }
+                            val off = ((colOff % sH) + sH) % sH
+                            for (y in 0 until sH - off) { buf[y * sW + x] = colTmp[y + off] }
+                            for (y in sH - off until sH) { buf[y * sW + x] = colTmp[y + off - sH] }
+                        }
                     }
                 }
                 cc += lenCells
@@ -1209,11 +1224,11 @@ private fun applyPixelSort(buf: IntArray, sW: Int, sH: Int, sortRowFrac: Float, 
 }
 
 /**
- * Pixel tears — cell-granularity luminance sort for GLITCH2 (salt 26).
- * Walks cell-rows and starts sort-bands as chunks of 1-3 cells. Within each chunk
- * all rows sort the same fixed horizontal band, so tears appear as solid rectangular
- * blocks rather than isolated per-row lines. Frequency and band width scale with
- * [pixelSort] (= slider/500). Bigger tile → fewer cells → fewer tear events.
+ * Pixel tears — cell-granularity luminance sort for GLITCH2 (salts 26/27).
+ * Cell-chunk walk (salt 26) controls *where* and *how often* tear clusters fire —
+ * preserving the tile-size link and slider scaling from round 2. Within each chunk
+ * every pixel row gets its **own** randomised sort band (salt 27), so tears are ragged
+ * at the pixel level rather than a single repeated rectangle.
  *
  * [pixelSort] ∈ [0,1] is the raw slider fraction.
  * [rowDensity] is the normalised per-grid-row density array from [glitch2Filter].
@@ -1238,20 +1253,20 @@ private fun applyPixelTears(
         val pStart = pixelSort * (P_BASE + P_GAIN * density)
         if (hashUnit(cr, 0, 26) < pStart) {
             val lenCells = 1 + (hashUnit(cr, 1, 26) * 3f).toInt()
-            // Fix the sort band for this entire chunk
-            val bandRunLen = (hashUnit(cr, 2, 26) * maxRun).toInt().coerceIn(2, maxRun)
-            val bandStart  = (hashUnit(cr, 3, 26) * (sW - bandRunLen)).toInt().coerceIn(0, sW - bandRunLen)
             val yStart = cr * tile
             val yEnd = min((cr + lenCells) * tile, sH)
+            // Each row in the chunk gets its own band (salt 27) — pixel-granular tears.
             for (y in yStart until yEnd) {
-                val base2 = y * sW + bandStart
-                for (i in 0 until bandRunLen) {
+                val runLen = (hashUnit(y, 0, 27) * maxRun).toInt().coerceIn(2, maxRun)
+                val bStart = (hashUnit(y, 1, 27) * (sW - runLen)).toInt().coerceIn(0, sW - runLen)
+                val base2 = y * sW + bStart
+                for (i in 0 until runLen) {
                     val px = buf[base2 + i]
                     val lum = ((px shr 16 and 0xFF) * 77 + (px shr 8 and 0xFF) * 150 + (px and 0xFF) * 29) ushr 8
                     sortPix[i] = px; sortKey[i] = ((lum xor 0x80) shl 24) or i
                 }
-                sortKey.sort(0, bandRunLen)
-                for (d in 0 until bandRunLen) { buf[base2 + d] = sortPix[sortKey[d] and 0x00FFFFFF] }
+                sortKey.sort(0, runLen)
+                for (d in 0 until runLen) { buf[base2 + d] = sortPix[sortKey[d] and 0x00FFFFFF] }
             }
             cr += lenCells
         } else {
