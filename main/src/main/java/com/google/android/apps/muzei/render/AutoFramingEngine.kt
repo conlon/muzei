@@ -38,6 +38,48 @@ object AutoFramingEngine {
     private const val DECODE_SIZE = 512
     private const val PADDING_FACTOR = 0.15f
 
+    /**
+     * Detects faces in the artwork at [artworkUri] and returns their bounding boxes
+     * as normalised [RectF] values (coordinates in 0..1 relative to image size).
+     * Returns an empty list when no faces are detected or detection fails.
+     * Intended for use with GLITCH2 filter to bias displacement chunks toward faces.
+     */
+    suspend fun detectFaceRegions(
+            contentResolver: ContentResolver,
+            artworkUri: Uri
+    ): List<RectF> = withContext(Dispatchers.IO) {
+        try {
+            val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
+                    .decode(DECODE_SIZE) ?: return@withContext emptyList()
+            val imageWidth = bitmap.width.toFloat()
+            val imageHeight = bitmap.height.toFloat()
+            if (imageWidth == 0f || imageHeight == 0f) {
+                bitmap.recycle()
+                return@withContext emptyList()
+            }
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val faceOptions = FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                    .build()
+            val faceDetector = FaceDetection.getClient(faceOptions)
+            val faces = try {
+                faceDetector.process(inputImage).await()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            faceDetector.close()
+            bitmap.recycle()
+            faces.map { face ->
+                val b = face.boundingBox
+                RectF(b.left / imageWidth, b.top / imageHeight,
+                        b.right / imageWidth, b.bottom / imageHeight)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Face detection failed", e)
+            emptyList()
+        }
+    }
+
     suspend fun computeFraming(
             contentResolver: ContentResolver,
             artworkUri: Uri,

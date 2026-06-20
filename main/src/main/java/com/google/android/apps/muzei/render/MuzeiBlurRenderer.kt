@@ -136,6 +136,13 @@ class MuzeiBlurRenderer(
     private var zoomAmount: Float = 1f
     @Volatile
     var pendingSavedViewport: RectF? = null
+    @Volatile
+    var pendingFaceRegions: List<RectF>? = null
+
+    /** True when the active effect will consume face region data (i.e. GLITCH2 is selected). */
+    fun wantsSubjectRegions(): Boolean =
+            currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&
+            currentMosaicFilter == MosaicFilter.GLITCH2
     private val currentViewport = RectF() // [-1, -1] to [1, 1], flipped
 
     var isBlurred = true
@@ -455,6 +462,7 @@ class MuzeiBlurRenderer(
             ArtworkSizeStateFlow.value = ArtworkSize(width, height)
             val savedViewport = pendingSavedViewport
             nextGLPictureSet.savedViewport = savedViewport
+            nextGLPictureSet.faceRegions = pendingFaceRegions
             if (savedViewport != null) {
                 ArtDetailViewport.setViewport(nextGLPictureSet.id, savedViewport)
             } else {
@@ -494,6 +502,7 @@ class MuzeiBlurRenderer(
         private var bitmapAspectRatio = 1f
         var dimAmount = 0
         var savedViewport: RectF? = null
+        var faceRegions: List<RectF>? = null
 
         fun load(imageLoader: ImageLoader) {
             val (width, height) = imageLoader.getSize()
@@ -576,7 +585,7 @@ class MuzeiBlurRenderer(
                             } else {
                                 currentMosaicShape
                             }
-                            generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape, currentMosaicFilter)
+                            generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape, currentMosaicFilter, faceRegions)
                         } else {
                             generateBlurKeyframes(scaledBitmap)
                         }
@@ -788,10 +797,12 @@ class MuzeiBlurRenderer(
             shape: MosaicShape,
             filter: MosaicFilter,
             frameIndex: Int,
+            subjectRegions: List<RectF>? = null,
         ): android.graphics.Bitmap? {
             return try {
                 mosaicBitmap(source, tilePx, shape, filter,
-                    glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+                    glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort,
+                    subjectRegions)
             } catch (firstErr: Throwable) {
                 Log.e(TAG, "Mosaic frame $frameIndex failed (tile=$tilePx shape=$shape filter=$filter), retrying at 2× tile", firstErr)
                 // Retry: double the tile size to cut memory roughly in half; clamp
@@ -800,7 +811,8 @@ class MuzeiBlurRenderer(
                 val safeV = glitchVDisplacement.coerceAtMost(250)
                 try {
                     mosaicBitmap(source, tilePx * 2, shape, filter,
-                        safeH, safeV, glitchChannelSplit, glitchPixelSort)
+                        safeH, safeV, glitchChannelSplit, glitchPixelSort,
+                        subjectRegions)
                 } catch (secondErr: Throwable) {
                     Log.e(TAG, "Mosaic frame $frameIndex retry also failed; falling back to sharp photo", secondErr)
                     null  // caller will use pictures[0]
@@ -813,11 +825,12 @@ class MuzeiBlurRenderer(
             scaledHeight: Int,
             effectiveShape: MosaicShape,
             effectiveFilter: MosaicFilter,
+            subjectRegions: List<RectF>? = null,
         ) {
             val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
-                val pixelated = tryMosaicBitmap(scaledBitmap, tilePx, effectiveShape, effectiveFilter, f)
+                val pixelated = tryMosaicBitmap(scaledBitmap, tilePx, effectiveShape, effectiveFilter, f, subjectRegions)
 
                 // If mosaic generation failed entirely, fall back to the sharp photo for this frame.
                 if (pixelated == null) {

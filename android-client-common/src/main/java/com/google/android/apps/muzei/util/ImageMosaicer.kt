@@ -21,6 +21,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.RectF
 import androidx.core.graphics.scale
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -75,6 +76,7 @@ fun mosaicBitmap(
     glitchVDisplacement: Int = 250,
     glitchChannelSplit: Int = 250,
     glitchPixelSort: Int = 250,
+    subjectRegions: List<RectF>? = null,
 ): Bitmap? {
     if (source == null || source.width == 0 || source.height == 0) return null
     val tile = max(1, tileSizePx)
@@ -93,7 +95,7 @@ fun mosaicBitmap(
     return when (filter) {
         MosaicFilter.NONE      -> base
         MosaicFilter.GLITCH1   -> glitch1Filter(base, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
-        MosaicFilter.GLITCH2   -> glitch2Filter(base, source, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort)
+        MosaicFilter.GLITCH2   -> glitch2Filter(base, source, tile, glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort, subjectRegions)
         MosaicFilter.RAINDROP  -> base  // handled by early dispatch above; unreachable
         MosaicFilter.RECURSIVE -> base  // handled by early dispatch above; unreachable
     }
@@ -1076,6 +1078,7 @@ private fun glitch2Filter(
     vDisplacement: Int = 250,
     channelSplit: Int = 250,
     pixelSort: Int = 250,
+    subjectRegions: List<RectF>? = null,
 ): Bitmap {
     val tdH = hDisplacement / 500f
     val tdV = vDisplacement / 500f
@@ -1121,26 +1124,44 @@ private fun glitch2Filter(
     val normColDensity = FloatArray(colDensity.size) { colDensity[it] / maxColDensity }
 
     // ---- Cell-chunk glitch constants ----
-    // Frequency = slider * (P_BASE + P_GAIN * density). Bigger tile → fewer cells →
-    // fewer glitch events; halving the slider halves the rate. No constant baseline term.
+    // Frequency = slider * (P_BASE + P_GAIN * density + G_FACE_GAIN * faceWeight).
+    // Bigger tile → fewer cells → fewer glitch events; halving the slider halves the rate.
+    // G_FACE_GAIN boosts probability for displacement chunks that overlap a detected face.
     val G_P_BASE = 0.04f
     val G_P_GAIN = 0.20f
+    val G_FACE_GAIN = 0.50f
 
-    // ---- H-displacement (salts 22/23): cell-row chunks ----
-    // Each chunk: 1-3 cell-rows all shifted by the same offset (block tear).
+    // ---- Displacement chunk cell size — decoupled from tile at the low end ----
+    // At tile=1 the standard cell is 1px, which collapses displacement into pixel grain.
+    // dispCell enforces an absolute minimum block height (~30px at 1080p) so displacement
+    // stays blocky regardless of the tile slider. Once tile exceeds the floor, dispCell
+    // == tile and behaviour is identical to before.
+    val MIN_DISP_CELL = max(8, sH / 64)
+    val dispCell = max(tile, MIN_DISP_CELL)
+    val dispRows = ceil(sH.toFloat() / dispCell).toInt() + 1
+    val dispCols = ceil(sW.toFloat() / dispCell).toInt() + 1
+
+    // ---- H-displacement (salts 22/23): disp-cell-row chunks ----
+    // Each chunk: 1-3 disp-cells all shifted by the same offset (block tear), with a
+    // per-row correlated random-walk smear on top (salt 23, round 4).
+    // Density and face-weight bias where chunks start.
     if (tdH > 0f) {
         val rowTmp = IntArray(sW)
         var cr = 0
-        while (cr < numRows) {
-            val density = normRowDensity[cr.coerceIn(0, normRowDensity.size - 1)]
-            val pStart = tdH * (G_P_BASE + G_P_GAIN * density)
+        while (cr < dispRows) {
+            val yMid = (cr + 0.5f) * dispCell
+            val densIdx = ((cr * dispCell) / tile).coerceIn(0, normRowDensity.size - 1)
+            val density = normRowDensity[densIdx]
+            val faceW = if (!subjectRegions.isNullOrEmpty() &&
+                    subjectRegions.any { yMid in it.top * sH..it.bottom * sH }) 1f else 0f
+            val pStart = tdH * (G_P_BASE + G_P_GAIN * density + G_FACE_GAIN * faceW)
             if (hashUnit(cr, 0, 22) < pStart) {
                 val lenCells = 1 + (hashUnit(cr, 1, 22) * 3f).toInt()
                 val rawMag = (tdH * (0.10f + 0.35f * density) * sW).toInt()
                 val hOffset = if (rawMag == 0) 0 else if (hashUnit(cr, 2, 22) < 0.5f) rawMag else -rawMag
                 if (hOffset != 0) {
-                    val yStart = cr * tile
-                    val yEnd = min((cr + lenCells) * tile, sH)
+                    val yStart = cr * dispCell
+                    val yEnd = min((cr + lenCells) * dispCell, sH)
                     // Per-row smear: bounded random walk (salt 23). Each row nudges a
                     // running accumulator by ±stepAmp; neighbours stay close.
                     val stepAmp = max(1f, Math.abs(hOffset) * 0.05f)
@@ -1166,21 +1187,25 @@ private fun glitch2Filter(
         }
     }
 
-    // ---- V-displacement (salts 24/25): cell-column chunks ----
-    // Each chunk: 1-3 cell-columns all shifted by the same vertical offset.
+    // ---- V-displacement (salts 24/25): disp-cell-column chunks ----
+    // Each chunk: 1-3 disp-cells all shifted by the same vertical offset.
     if (tdV > 0f) {
         val colTmp = IntArray(sH)
         var cc = 0
-        while (cc < numCols) {
-            val density = normColDensity[cc.coerceIn(0, normColDensity.size - 1)]
-            val pStart = tdV * (G_P_BASE + G_P_GAIN * density)
+        while (cc < dispCols) {
+            val xMid = (cc + 0.5f) * dispCell
+            val densIdx = ((cc * dispCell) / tile).coerceIn(0, normColDensity.size - 1)
+            val density = normColDensity[densIdx]
+            val faceW = if (!subjectRegions.isNullOrEmpty() &&
+                    subjectRegions.any { xMid in it.left * sW..it.right * sW }) 1f else 0f
+            val pStart = tdV * (G_P_BASE + G_P_GAIN * density + G_FACE_GAIN * faceW)
             if (hashUnit(cc, 0, 24) < pStart) {
                 val lenCells = 1 + (hashUnit(cc, 1, 24) * 3f).toInt()
                 val rawMag = (tdV * (0.10f + 0.35f * density) * sH).toInt()
                 val vOffset = if (rawMag == 0) 0 else if (hashUnit(cc, 2, 24) < 0.5f) rawMag else -rawMag
                 if (vOffset != 0) {
-                    val xStart = cc * tile
-                    val xEnd = min((cc + lenCells) * tile, sW)
+                    val xStart = cc * dispCell
+                    val xEnd = min((cc + lenCells) * dispCell, sW)
                     // Per-col smear: bounded random walk (salt 25). Each column nudges a
                     // running accumulator by ±stepAmp; neighbours stay close.
                     val stepAmp = max(1f, Math.abs(vOffset) * 0.05f)

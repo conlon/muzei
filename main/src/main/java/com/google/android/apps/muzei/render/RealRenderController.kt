@@ -73,6 +73,13 @@ class RealRenderController(
         } catch (_: Exception) {
             currentArtworkUri.hashCode().toLong()
         }
+        // Run face detection for GLITCH2 so displacement chunks can be biased toward faces.
+        // Only run when the active filter will actually consume the result.
+        renderer.pendingFaceRegions = if (renderer.wantsSubjectRegions()) {
+            AutoFramingEngine.detectFaceRegions(context.contentResolver, currentArtworkUri)
+        } else {
+            null
+        }
         return ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
     }
 }
