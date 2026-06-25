@@ -82,6 +82,21 @@ class GalleryScanWorker(
                     OneTimeWorkRequestBuilder<GalleryScanWorker>()
                             .build())
         }
+
+        // SharedPreferences keys shared with GalleryArtProvider for rescan throttling.
+        internal const val PREFS_NAME = "gallery_scan_prefs"
+        internal const val KEY_LAST_RESCAN_TIME = "last_rescan_time"
+        // 15 minutes: generous enough to pick up newly-added photos without
+        // triggering a full SAF tree crawl on every tap-Next during browsing.
+        internal const val RESCAN_THROTTLE_MS = 15L * 60L * 1_000L
+
+        /** Stamps the current time as the last successful full-rescan completion. */
+        fun markRescanComplete(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putLong(KEY_LAST_RESCAN_TIME, System.currentTimeMillis())
+                    .apply()
+        }
     }
 
     private val geocoder by lazy {
@@ -109,10 +124,13 @@ class GalleryScanWorker(
                 .chosenPhotosBlocking
         val numChosenUris = chosenPhotos.size
         if (numChosenUris > 0) {
+            Log.d("NextTiming", "Rescan start ($numChosenUris URIs)")
             for (chosenPhoto in chosenPhotos) {
                 scanChosenPhoto(providerClient, chosenPhoto)
             }
             deleteMediaUris(providerClient)
+            markRescanComplete(applicationContext)
+            Log.d("NextTiming", "Rescan done")
             return Result.success()
         }
         return addMediaUri(providerClient)

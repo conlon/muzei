@@ -499,6 +499,32 @@ class MuzeiBlurRenderer(
         callbacks.requestRender()
     }
 
+    /**
+     * Called from [com.google.android.apps.muzei.render.RealRenderController] when async
+     * auto-framing completes for the current image. Must run on the GL thread.
+     *
+     * Updates the current picture set's saved viewport (which drives the sharp-state
+     * rendering) and triggers a re-render so the crop settles onto the subject a beat
+     * after the photo appeared.
+     */
+    fun applyAutoFramedViewport(viewport: RectF) {
+        currentGLPictureSet.savedViewport = viewport
+        ArtDetailViewport.setViewport(currentGLPictureSet.id, viewport)
+        callbacks.requestRender()
+    }
+
+    /**
+     * Called from [com.google.android.apps.muzei.render.RealRenderController] when async
+     * face detection completes for the current image. Must run on the GL thread.
+     *
+     * Stores face regions on the current picture set so they are available when
+     * [GLPictureSet.bakeDeferredEffects] fires (when the renderer transitions to blurred).
+     */
+    fun applyAsyncFaceRegions(faceRegions: List<RectF>?) {
+        pendingFaceRegions = faceRegions
+        currentGLPictureSet.faceRegions = faceRegions
+    }
+
     private inner class GLPictureSet(val id: Int) {
         private val projectionMatrix = FloatArray(16)
         private val mvpMatrix = FloatArray(16)

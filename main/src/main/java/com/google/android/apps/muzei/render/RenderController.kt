@@ -240,6 +240,10 @@ abstract class RenderController(
         }
     }
 
+    protected fun queueEventOnGlThread(event: () -> Unit) {
+        callbacks.queueEventOnGlThread(event)
+    }
+
     interface Callbacks {
         fun queueEventOnGlThread(event: () -> Unit)
         fun requestRender()
