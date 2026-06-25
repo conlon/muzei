@@ -97,6 +97,83 @@ object AutoFramingEngine {
         }
     }
 
+    /**
+     * Combined single-decode path for when both auto-framing and GLITCH2 face-biasing are
+     * needed for the same image. Decodes once, runs the face detector once, and returns both
+     * the viewport and the face regions so callers avoid a redundant decode + detection pass.
+     *
+     * @return A pair of (viewport RectF or null, face regions list — may be empty).
+     */
+    suspend fun computeFramingAndFaceRegions(
+            contentResolver: ContentResolver,
+            artworkUri: Uri,
+            screenAspectRatio: Float
+    ): Pair<RectF?, List<RectF>> = withContext(Dispatchers.IO) {
+        try {
+            val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
+                    .decode(DECODE_SIZE) ?: return@withContext Pair(null, emptyList())
+            val imageWidth = bitmap.width.toFloat()
+            val imageHeight = bitmap.height.toFloat()
+            if (imageWidth == 0f || imageHeight == 0f) {
+                bitmap.recycle()
+                return@withContext Pair(null, emptyList())
+            }
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            // Run face detection once
+            val faceOptions = FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                    .build()
+            val faceDetector = FaceDetection.getClient(faceOptions)
+            val faces = try {
+                faceDetector.process(inputImage).await()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            faceDetector.close()
+            val faceBounds = faces.map { face ->
+                val b = face.boundingBox
+                RectF(b.left / imageWidth, b.top / imageHeight,
+                        b.right / imageWidth, b.bottom / imageHeight)
+            }
+            // Run object detection for auto-framing (heavier pass)
+            val objectOptions = ObjectDetectorOptions.Builder()
+                    .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
+                    .enableMultipleObjects()
+                    .enableClassification()
+                    .build()
+            val objectDetector = ObjectDetection.getClient(objectOptions)
+            val objects = try {
+                objectDetector.process(inputImage).await()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            objectDetector.close()
+            val objectBounds = objects.map { obj ->
+                val b = obj.boundingBox
+                RectF(b.left / imageWidth, b.top / imageHeight,
+                        b.right / imageWidth, b.bottom / imageHeight)
+            }
+            bitmap.recycle()
+            val allBounds = faceBounds + objectBounds
+            val viewport = if (allBounds.isEmpty()) {
+                null
+            } else {
+                val subjectUnion = RectF(
+                        allBounds.minOf { it.left }, allBounds.minOf { it.top },
+                        allBounds.maxOf { it.right }, allBounds.maxOf { it.bottom })
+                val faceUnion = if (faceBounds.isNotEmpty()) {
+                    RectF(faceBounds.minOf { it.left }, faceBounds.minOf { it.top },
+                            faceBounds.maxOf { it.right }, faceBounds.maxOf { it.bottom })
+                } else null
+                fitViewport(subjectUnion, faceUnion, screenAspectRatio, imageWidth / imageHeight)
+            }
+            Pair(viewport, faceBounds)
+        } catch (e: Exception) {
+            Log.w(TAG, "Combined framing+face detection failed", e)
+            Pair(null, emptyList())
+        }
+    }
+
     private suspend fun detectSubjects(bitmap: Bitmap, screenAspectRatio: Float): RectF? {
         val imageWidth = bitmap.width.toFloat()
         val imageHeight = bitmap.height.toFloat()

@@ -84,7 +84,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -113,11 +115,22 @@ class ArtDetailViewModel(application: Application) : AndroidViewModel(applicatio
     val currentArtwork = database.artworkDao().getCurrentArtworkFlow()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), null)
 
-    val currentArtworkHasSavedViewport = database.artworkDao().getCurrentArtworkFlow()
+    // Derive favorite/framing state from the per-image metadata table so that user choices
+    // persist across multiple appearances of the same image.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val currentImageMetadata = database.artworkDao().getCurrentArtworkFlow()
+            .map { it?.imageUri }
+            .distinctUntilChanged()
+            .flatMapLatest { uri ->
+                if (uri != null) database.imageMetadataDao().getByImageUriFlow(uri)
+                else kotlinx.coroutines.flow.flowOf(null)
+            }
+
+    val currentArtworkHasSavedViewport = currentImageMetadata
             .map { it?.hasSavedViewport == true }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
 
-    val currentArtworkIsFavorite = database.artworkDao().getCurrentArtworkFlow()
+    val currentArtworkIsFavorite = currentImageMetadata
             .map { it?.isFavorite == true }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), false)
 
@@ -139,22 +152,22 @@ class ArtDetailViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun saveFraming(artworkId: Long, viewport: android.graphics.RectF) {
+    fun saveFraming(imageUri: android.net.Uri, viewport: android.graphics.RectF) {
         viewModelScope.launch {
-            database.artworkDao().updateSavedViewport(
-                    artworkId, viewport.left, viewport.top, viewport.right, viewport.bottom)
+            database.imageMetadataDao().updateSavedViewport(
+                    imageUri, viewport.left, viewport.top, viewport.right, viewport.bottom)
         }
     }
 
-    fun clearFraming(artworkId: Long) {
+    fun clearFraming(imageUri: android.net.Uri) {
         viewModelScope.launch {
-            database.artworkDao().updateSavedViewport(artworkId, null, null, null, null)
+            database.imageMetadataDao().updateSavedViewport(imageUri, null, null, null, null)
         }
     }
 
-    fun toggleFavorite(artworkId: Long, currentlyFavorite: Boolean) {
+    fun toggleFavorite(imageUri: android.net.Uri, currentlyFavorite: Boolean) {
         viewModelScope.launch {
-            database.artworkDao().setFavorite(artworkId, !currentlyFavorite)
+            database.imageMetadataDao().setFavorite(imageUri, !currentlyFavorite)
         }
     }
 }
@@ -294,14 +307,14 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
             val artwork = viewModel.currentArtwork.value ?: return@setOnClickListener
             val viewport = ArtDetailViewport.getViewport(currentViewportId)
             if (viewport.width() == 0f || viewport.height() == 0f) return@setOnClickListener
-            viewModel.saveFraming(artwork.id, viewport)
+            viewModel.saveFraming(artwork.imageUri, viewport)
             updateSaveFramingButton(true)
             Toast.makeText(requireContext(), R.string.toast_framing_saved,
                     Toast.LENGTH_SHORT).show()
         }
         binding.saveFraming.setOnLongClickListener {
             val artwork = viewModel.currentArtwork.value ?: return@setOnLongClickListener false
-            viewModel.clearFraming(artwork.id)
+            viewModel.clearFraming(artwork.imageUri)
             updateSaveFramingButton(false)
             Toast.makeText(requireContext(), R.string.toast_framing_cleared,
                     Toast.LENGTH_SHORT).show()
@@ -321,7 +334,7 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
 
         binding.favorite.setOnClickListener {
             val artwork = viewModel.currentArtwork.value ?: return@setOnClickListener
-            viewModel.toggleFavorite(artwork.id, viewModel.currentArtworkIsFavorite.value)
+            viewModel.toggleFavorite(artwork.imageUri, viewModel.currentArtworkIsFavorite.value)
         }
 
         // Ensure that when the view state is saved, the SubsamplingScaleImageView also
@@ -414,9 +427,15 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
         SwitchingPhotosStateFlow.filterNotNull().collectIn(viewLifecycleOwner) { switchingPhotos ->
             currentViewportId = switchingPhotos.viewportId
             binding.panScaleProxy.panScaleEnabled = switchingPhotos is SwitchingPhotosDone
-            // Process deferred artwork size change when done switching
-            if (switchingPhotos is SwitchingPhotosDone && deferResetViewport) {
-                resetProxyViewport()
+            if (switchingPhotos is SwitchingPhotosDone) {
+                // Artwork is fully loaded — stop the spinner immediately rather than
+                // waiting for the fixed-duration fallback timer.
+                showFakeLoading = false
+                updateLoadingSpinnerVisibility()
+                // Process deferred artwork size change when done switching
+                if (deferResetViewport) {
+                    resetProxyViewport()
+                }
             }
         }
 
@@ -590,12 +609,13 @@ class ArtDetailFragment : Fragment(R.layout.art_detail_fragment) {
 
     private fun showFakeLoading() {
         showFakeLoading = true
-        // Show a loading spinner for up to 10 seconds. When new artwork is loaded,
-        // the loading spinner will go away.
+        // Show a loading spinner until SwitchingPhotosDone arrives (cleared in the
+        // SwitchingPhotosStateFlow collector above). The timer here is a safety fallback
+        // in case the state flow doesn't transition for some reason.
         updateLoadingSpinnerVisibility()
         unsetNextFakeLoading?.cancel()
         unsetNextFakeLoading = viewLifecycleOwner.lifecycleScope.launch {
-            delay(10000)
+            delay(3000)
             showFakeLoading = false
             updateLoadingSpinnerVisibility()
         }

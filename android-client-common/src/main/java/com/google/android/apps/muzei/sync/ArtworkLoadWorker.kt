@@ -42,6 +42,7 @@ import com.google.android.apps.muzei.api.provider.MuzeiArtProvider
 import com.google.android.apps.muzei.api.provider.ProviderContract
 import com.google.android.apps.muzei.render.isValidImage
 import com.google.android.apps.muzei.room.Artwork
+import com.google.android.apps.muzei.room.ImageMetadata
 import com.google.android.apps.muzei.room.MuzeiDatabase
 import com.google.android.apps.muzei.util.ContentProviderClientCompat
 import com.google.android.apps.muzei.util.getLong
@@ -141,6 +142,8 @@ class ArtworkLoadWorker(
                             if (validArtwork != null) {
                                 validArtwork.providerAuthority = authority
                                 val artworkId = database.artworkDao().insert(validArtwork)
+                                database.imageMetadataDao().ensureRow(
+                                        ImageMetadata(validArtwork.imageUri, authority))
                                 if (BuildConfig.DEBUG) {
                                     Log.d(TAG, "Loaded ${validArtwork.imageUri} into id $artworkId")
                                 }
@@ -190,6 +193,8 @@ class ArtworkLoadWorker(
                                 checkForValidArtwork(client, contentUri, allArtwork)?.apply {
                                     providerAuthority = authority
                                     val artworkId = database.artworkDao().insert(this)
+                                    database.imageMetadataDao().ensureRow(
+                                            ImageMetadata(imageUri, authority))
                                     if (BuildConfig.DEBUG) {
                                         Log.d(TAG, "Loaded $imageUri into id $artworkId")
                                     }
@@ -245,6 +250,8 @@ class ArtworkLoadWorker(
                                 checkForValidArtwork(client, contentUri, allArtwork)?.apply {
                                     providerAuthority = authority
                                     val artworkId = database.artworkDao().insert(this)
+                                    database.imageMetadataDao().ensureRow(
+                                            ImageMetadata(imageUri, authority))
                                     if (BuildConfig.DEBUG) {
                                         Log.d(TAG, "Loaded $imageUri into id $artworkId")
                                     }

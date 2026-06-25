@@ -36,17 +36,19 @@ import java.io.File
  * Room Database for Muzei
  */
 @Database(
-    entities = [(Artwork::class), (Provider::class)],
+    entities = [(Artwork::class), (Provider::class), (ImageMetadata::class)],
     autoMigrations = [
         AutoMigration(from = 4, to = 5)
     ],
-    version = 10
+    version = 11
 )
 abstract class MuzeiDatabase : RoomDatabase() {
 
     abstract fun providerDao(): ProviderDao
 
     abstract fun artworkDao(): ArtworkDao
+
+    abstract fun imageMetadataDao(): ImageMetadataDao
 
     companion object {
         @Volatile
@@ -65,7 +67,8 @@ abstract class MuzeiDatabase : RoomDatabase() {
                                 Migration6to8(applicationContext),
                                 Migration7to8(applicationContext),
                                 MIGRATION_8_9,
-                                MIGRATION_9_10)
+                                MIGRATION_9_10,
+                                MIGRATION_10_11)
                         .build().also { database ->
                             database.invalidationTracker.addObserver(
                                     object : InvalidationTracker.Observer("artwork") {
@@ -382,6 +385,51 @@ abstract class MuzeiDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE artwork ADD COLUMN saved_viewport_right REAL")
                 db.execSQL("ALTER TABLE artwork ADD COLUMN saved_viewport_bottom REAL")
                 db.execSQL("ALTER TABLE artwork ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Create the per-image metadata table (one row per image, keyed by imageUri).
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS image_metadata (
+                        imageUri TEXT NOT NULL PRIMARY KEY,
+                        providerAuthority TEXT NOT NULL,
+                        is_favorite INTEGER NOT NULL DEFAULT 0,
+                        saved_viewport_left REAL,
+                        saved_viewport_top REAL,
+                        saved_viewport_right REAL,
+                        saved_viewport_bottom REAL
+                    )
+                """.trimIndent())
+                // Seed from existing history rows so previously favorited/framed images
+                // are carried forward. For each imageUri, favourite = true if ANY history row
+                // was favorited; viewport = from the most recent row that has one.
+                db.execSQL("""
+                    INSERT OR IGNORE INTO image_metadata
+                        (imageUri, providerAuthority, is_favorite,
+                         saved_viewport_left, saved_viewport_top,
+                         saved_viewport_right, saved_viewport_bottom)
+                    SELECT
+                        a.imageUri,
+                        a.providerAuthority,
+                        MAX(a.is_favorite),
+                        vp.saved_viewport_left,
+                        vp.saved_viewport_top,
+                        vp.saved_viewport_right,
+                        vp.saved_viewport_bottom
+                    FROM artwork a
+                    LEFT JOIN (
+                        SELECT imageUri,
+                               saved_viewport_left, saved_viewport_top,
+                               saved_viewport_right, saved_viewport_bottom
+                        FROM artwork
+                        WHERE saved_viewport_left IS NOT NULL
+                        GROUP BY imageUri
+                        HAVING date_added = MAX(date_added)
+                    ) vp ON a.imageUri = vp.imageUri
+                    GROUP BY a.imageUri
+                """.trimIndent())
             }
         }
     }

@@ -316,10 +316,28 @@ class ProviderManager private constructor(private val context: Context)
         if (favoriteBoost > 0 && (Math.random() * 100) < favoriteBoost) {
             GlobalScope.launch {
                 val database = MuzeiDatabase.getInstance(context)
-                val favorite = database.artworkDao().getRandomFavorite()
-                if (favorite != null) {
-                    database.artworkDao().updateDateAdded(favorite.id, System.currentTimeMillis())
-                    return@launch
+                // Pull a random favorite from the per-image metadata table so that the choice
+                // persists even when the history row has rolled over.
+                val favoriteMeta = database.imageMetadataDao().getRandomFavorite()
+                if (favoriteMeta != null) {
+                    // If the favored image is already in the history table, re-surface it by
+                    // bumping its date_added. Otherwise let ArtworkLoadWorker pick the next
+                    // image normally — it will still load non-favorited images until that image
+                    // appears again via the provider. (Full favorite-targeted reload is a
+                    // deferred follow-up.)
+                    val existing = database.artworkDao().getCurrentArtwork()
+                    if (existing != null && existing.imageUri == favoriteMeta.imageUri) {
+                        // Already showing it; fall through to a normal advance
+                        ArtworkLoadWorker.enqueueNext(context)
+                        return@launch
+                    }
+                    // Find the most recent history row for this imageUri and bump it
+                    val historyRows = database.artworkDao().getArtwork()
+                    val match = historyRows.firstOrNull { it.imageUri == favoriteMeta.imageUri }
+                    if (match != null) {
+                        database.artworkDao().updateDateAdded(match.id, System.currentTimeMillis())
+                        return@launch
+                    }
                 }
                 ArtworkLoadWorker.enqueueNext(context)
             }

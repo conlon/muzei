@@ -19,6 +19,7 @@ package com.google.android.apps.muzei.render
 import android.content.ContentUris
 import android.content.Context
 import android.graphics.RectF
+import android.net.Uri
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.apps.muzei.api.MuzeiContract
 import com.google.android.apps.muzei.room.MuzeiDatabase
@@ -48,22 +49,62 @@ class RealRenderController(
         super.onStart(owner)
         val database = MuzeiDatabase.getInstance(context)
         database.artworkDao().getCurrentArtworkFlow().filterNotNull().collectIn(owner) { artwork ->
-            currentArtworkUri = artwork.contentUri
-            renderer.pendingSavedViewport = if (artwork.hasSavedViewport) {
-                RectF(artwork.savedViewportLeft!!, artwork.savedViewportTop!!,
-                        artwork.savedViewportRight!!, artwork.savedViewportBottom!!)
-            } else {
-                val autoFramingEnabled = Prefs.getSharedPreferences(context)
-                        .getBoolean(Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
-                val screenAspectRatio = renderer.getAspectRatio()
-                if (autoFramingEnabled && screenAspectRatio > 0f) {
-                    AutoFramingEngine.computeFraming(
-                            context.contentResolver, currentArtworkUri, screenAspectRatio)
-                } else {
-                    null
-                }
+            val newUri = artwork.contentUri
+            // Only reload (re-bake + ML Kit) when the image itself changes.
+            // Mutations like setFavorite / updateSavedViewport / updateDateAdded also
+            // re-emit this flow; without this guard they would each trigger a full
+            // reload, resetting the viewport and re-running expensive GL work.
+            if (newUri == currentArtworkUri) {
+                // Same image — just refresh the pending saved viewport in case the
+                // user saved/cleared framing, without triggering a re-bake.
+                renderer.pendingSavedViewport = pendingSavedViewportFor(artwork.imageUri)
+                return@collectIn
             }
+            currentArtworkUri = newUri
+            renderer.pendingSavedViewport = pendingSavedViewportFor(artwork.imageUri)
             reloadCurrentArtwork()
+        }
+    }
+
+    /**
+     * Cached face regions computed during the current artwork load. Populated by
+     * [pendingSavedViewportFor] when both auto-framing and GLITCH2 are active, so that
+     * [openDownloadedCurrentArtwork] can reuse the result without a second ML Kit pass.
+     */
+    private var cachedFaceRegions: List<RectF>? = null
+
+    /**
+     * Looks up the saved viewport for [imageUri] from the per-image metadata table, falling
+     * back to [AutoFramingEngine.computeFraming] when auto-framing is enabled and the image
+     * has no saved viewport.
+     *
+     * When both auto-framing and GLITCH2 face-biasing are needed, uses the combined single-
+     * decode path and caches the face regions so [openDownloadedCurrentArtwork] avoids a
+     * redundant detection pass.
+     */
+    private suspend fun pendingSavedViewportFor(imageUri: Uri): RectF? {
+        cachedFaceRegions = null
+        val database = MuzeiDatabase.getInstance(context)
+        val meta = database.imageMetadataDao().getByImageUri(imageUri)
+        if (meta != null && meta.hasSavedViewport) {
+            return RectF(meta.savedViewportLeft!!, meta.savedViewportTop!!,
+                    meta.savedViewportRight!!, meta.savedViewportBottom!!)
+        }
+        val autoFramingEnabled = Prefs.getSharedPreferences(context)
+                .getBoolean(Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
+        val screenAspectRatio = renderer.getAspectRatio()
+        if (!autoFramingEnabled || screenAspectRatio <= 0f) return null
+
+        return if (renderer.wantsSubjectRegions()) {
+            // Both auto-framing and GLITCH2 need a face pass — run them together in a
+            // single decode to avoid paying for two separate ML Kit face detections.
+            val (viewport, faceRegions) = AutoFramingEngine.computeFramingAndFaceRegions(
+                    context.contentResolver, currentArtworkUri, screenAspectRatio)
+            cachedFaceRegions = faceRegions
+            viewport
+        } else {
+            AutoFramingEngine.computeFraming(
+                    context.contentResolver, currentArtworkUri, screenAspectRatio)
         }
     }
 
@@ -73,13 +114,16 @@ class RealRenderController(
         } catch (_: Exception) {
             currentArtworkUri.hashCode().toLong()
         }
-        // Run face detection for GLITCH2 so displacement chunks can be biased toward faces.
-        // Only run when the active filter will actually consume the result.
+        // Ferry face regions to the renderer for GLITCH2 displacement biasing.
+        // Re-use any regions already computed in pendingSavedViewportFor (combined path)
+        // so we never decode + run face detection twice for the same image load.
         renderer.pendingFaceRegions = if (renderer.wantsSubjectRegions()) {
-            AutoFramingEngine.detectFaceRegions(context.contentResolver, currentArtworkUri)
+            cachedFaceRegions ?: AutoFramingEngine.detectFaceRegions(
+                    context.contentResolver, currentArtworkUri)
         } else {
             null
         }
+        cachedFaceRegions = null
         return ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
     }
 }
