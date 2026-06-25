@@ -66,7 +66,7 @@ sealed class ImageLoader {
         }
     }
 
-    fun getSize(): Pair<Int, Int> {
+    open fun getSize(): Pair<Int, Int> {
         return try {
             val (originalWidth, originalHeight) = openInputStream()?.use { input ->
                 val options = BitmapFactory.Options().apply {
@@ -87,7 +87,7 @@ sealed class ImageLoader {
         }
     }
 
-    fun decode(
+    open fun decode(
             targetWidth: Int = 0,
             targetHeight: Int = targetWidth
     ) : Bitmap? {
@@ -138,7 +138,7 @@ sealed class ImageLoader {
         }
     }
 
-    fun getRotation(): Int = try {
+    open fun getRotation(): Int = try {
         openInputStream()?.use { input ->
             val exifInterface = ExifInterface(input)
             when (exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION,
@@ -160,7 +160,12 @@ sealed class ImageLoader {
 }
 
 /**
- * An [ImageLoader] capable of loading images from a [ContentResolver]
+ * An [ImageLoader] capable of loading images from a [ContentResolver].
+ *
+ * Caches [getSize] and [getRotation] after the first call so that [decode] can skip the
+ * bounds-only stream open and use a single [openInputStream] for actual pixel decoding.
+ * Call [getSize] on an IO thread before handing the loader to the GL thread to move the
+ * expensive first-open content-provider round-trip off the render thread.
  */
 class ContentUriImageLoader(
         private val contentResolver: ContentResolver,
@@ -168,13 +173,64 @@ class ContentUriImageLoader(
         override val seed: Long = 0L,
 ) : ImageLoader() {
 
+    @Volatile private var cachedSize: Pair<Int, Int>? = null
+    @Volatile private var cachedRotation: Int? = null
+
     @Throws(FileNotFoundException::class)
     override fun openInputStream(): InputStream? =
             contentResolver.openInputStream(uri)
 
-    override fun toString(): String {
-        return uri.toString()
+    override fun getSize(): Pair<Int, Int> =
+            cachedSize ?: super.getSize().also { cachedSize = it }
+
+    // getSize() calls getRotation() internally, so this is also populated after getSize().
+    override fun getRotation(): Int =
+            cachedRotation ?: super.getRotation().also { cachedRotation = it }
+
+    override fun decode(targetWidth: Int, targetHeight: Int): Bitmap? {
+        val size = cachedSize
+        val rotation = cachedRotation
+        if (size == null || rotation == null) {
+            // Cache not yet warm — fall back to the base class (2 stream opens).
+            return super.decode(targetWidth, targetHeight)
+        }
+        val (origW, origH) = size
+        val width = if (rotation == 90 || rotation == 270) origH else origW
+        val height = if (rotation == 90 || rotation == 270) origW else origH
+        // Warm cache: only one stream open needed for actual pixel decode.
+        return try {
+            openInputStream()?.use { input ->
+                BitmapFactory.decodeStream(input, null,
+                        BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                            if (targetWidth != 0) {
+                                inSampleSize = max(
+                                        width.sampleSize(targetWidth),
+                                        height.sampleSize(targetHeight))
+                            }
+                        })
+            }?.run {
+                when (rotation) {
+                    0 -> this
+                    else -> {
+                        val rotateMatrix = Matrix().apply { postRotate(rotation.toFloat()) }
+                        Bitmap.createBitmap(this, 0, 0,
+                                this.width, this.height,
+                                rotateMatrix, true).also { rotated ->
+                            if (rotated != this) recycle()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) {
+                Log.w("ImageLoader", "Error decoding $uri: ${e.message}")
+            }
+            null
+        }
     }
+
+    override fun toString(): String = uri.toString()
 }
 
 /**

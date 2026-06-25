@@ -28,7 +28,9 @@ import com.google.android.apps.muzei.room.MuzeiDatabase
 import com.google.android.apps.muzei.room.contentUri
 import com.google.android.apps.muzei.settings.Prefs
 import com.google.android.apps.muzei.util.collectIn
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.withContext
 
 class RealRenderController(
         context: Context,
@@ -41,6 +43,13 @@ class RealRenderController(
      * use [MuzeiContract.Artwork.CONTENT_URI].
      */
     private var currentArtworkUri = MuzeiContract.Artwork.CONTENT_URI
+
+    /**
+     * The imageUri for which auto-framing has already been computed this session.
+     * When artwork mutations cause the same image to re-emit from the flow, we skip
+     * re-running ML Kit for images where we already determined the viewport.
+     */
+    private var autoFramedImageUri: Uri? = null
 
     override fun onCreate(owner: LifecycleOwner) {
         super.onCreate(owner)
@@ -57,16 +66,32 @@ class RealRenderController(
             // re-emit this flow; without this guard they would each trigger a full
             // reload, resetting the viewport and re-running expensive GL work.
             if (newUri == currentArtworkUri) {
-                // Same image — just refresh the pending saved viewport in case the
-                // user saved/cleared framing, without triggering a re-bake.
-                renderer.pendingSavedViewport = pendingSavedViewportFor(artwork.imageUri)
+                // Same image — refresh the pending saved viewport only if the user has
+                // saved/cleared framing (imageUri not yet auto-framed, or saved viewport
+                // exists in DB). Skip if we already computed auto-framing for this image
+                // to avoid repeated ML Kit passes on every artwork mutation.
+                val imageUri = artwork.imageUri
+                val meta = MuzeiDatabase.getInstance(context)
+                        .imageMetadataDao().getByImageUri(imageUri)
+                if (meta != null && meta.hasSavedViewport) {
+                    // User saved a viewport — always apply it.
+                    renderer.pendingSavedViewport = RectF(
+                            meta.savedViewportLeft!!, meta.savedViewportTop!!,
+                            meta.savedViewportRight!!, meta.savedViewportBottom!!)
+                } else if (imageUri != autoFramedImageUri) {
+                    // Not yet auto-framed — run full computation (may include ML Kit).
+                    renderer.pendingSavedViewport = pendingSavedViewportFor(imageUri)
+                    autoFramedImageUri = imageUri
+                }
                 return@collectIn
             }
             val tFlow = SystemClock.elapsedRealtime()
             Log.d("NextTiming", "RC emission ${artwork.imageUri.lastPathSegment}")
             currentArtworkUri = newUri
+            autoFramedImageUri = null
             val tVp = SystemClock.elapsedRealtime()
             renderer.pendingSavedViewport = pendingSavedViewportFor(artwork.imageUri)
+            autoFramedImageUri = artwork.imageUri
             Log.d("NextTiming", "RC pendingSavedViewport +${SystemClock.elapsedRealtime() - tVp}ms (total +${SystemClock.elapsedRealtime() - tFlow}ms)")
             reloadCurrentArtwork()
             Log.d("NextTiming", "RC reloadCurrentArtwork +${SystemClock.elapsedRealtime() - tFlow}ms")
@@ -142,7 +167,12 @@ class RealRenderController(
             null
         }
         cachedFaceRegions = null
-        Log.d("NextTiming", "RC openDownloaded done +${SystemClock.elapsedRealtime() - t0}ms")
-        return ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
+        val loader = ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
+        // Warm getSize() (+ rotation) on IO thread so the GL thread never blocks on the
+        // first content-provider open. Also populates the decode() cache so each subsequent
+        // decode() call only needs one stream open instead of three.
+        withContext(Dispatchers.IO) { loader.getSize() }
+        Log.d("NextTiming", "RC openDownloaded+warm done +${SystemClock.elapsedRealtime() - t0}ms")
+        return loader
     }
 }
