@@ -28,6 +28,9 @@ import com.google.android.apps.muzei.room.MuzeiDatabase
 import com.google.android.apps.muzei.room.contentUri
 import com.google.android.apps.muzei.settings.Prefs
 import com.google.android.apps.muzei.util.collectIn
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNotNull
 
 class RealRenderController(
@@ -123,26 +126,35 @@ class RealRenderController(
         } catch (_: Exception) {
             currentArtworkUri.hashCode().toLong()
         }
-        // Ferry face regions to the renderer for GLITCH2 displacement biasing.
-        // Re-use any regions already computed in pendingSavedViewportFor (combined path)
-        // so we never decode + run face detection twice for the same image load.
-        renderer.pendingFaceRegions = if (renderer.wantsSubjectRegions()) {
-            val cached = cachedFaceRegions
-            if (cached != null) {
-                Log.d("NextTiming", "RC faceRegions cache-hit +${SystemClock.elapsedRealtime() - t0}ms")
-                cached
-            } else {
-                Log.d("NextTiming", "RC faceRegions cache-miss, running detectFaceRegions")
-                val result = AutoFramingEngine.detectFaceRegions(
-                        context.contentResolver, currentArtworkUri)
-                Log.d("NextTiming", "RC detectFaceRegions done +${SystemClock.elapsedRealtime() - t0}ms")
-                result
-            }
-        } else {
-            null
-        }
-        cachedFaceRegions = null
         val loader = ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
+        coroutineScope {
+            // Fill the byte buffer on IO concurrently with face detection so the GL
+            // thread's getSize/decode calls read from memory and never block on the
+            // slow content-provider open (which is ~90ms on IO vs ~3s on the GL thread).
+            val prefetchJob = async(Dispatchers.IO) {
+                Log.d("NextTiming", "RC prefetch start")
+                loader.prefetch()
+                Log.d("NextTiming", "RC prefetch done +${SystemClock.elapsedRealtime() - t0}ms")
+            }
+            // Ferry face regions to the renderer for GLITCH2 displacement biasing.
+            // Re-use any regions already computed in pendingSavedViewportFor (combined path)
+            // so we never decode + run face detection twice for the same image load.
+            renderer.pendingFaceRegions = if (renderer.wantsSubjectRegions()) {
+                val cached = cachedFaceRegions
+                if (cached != null) {
+                    Log.d("NextTiming", "RC faceRegions cache-hit +${SystemClock.elapsedRealtime() - t0}ms")
+                    cached
+                } else {
+                    Log.d("NextTiming", "RC faceRegions cache-miss, running detectFaceRegions")
+                    val result = AutoFramingEngine.detectFaceRegions(
+                            context.contentResolver, currentArtworkUri)
+                    Log.d("NextTiming", "RC detectFaceRegions done +${SystemClock.elapsedRealtime() - t0}ms")
+                    result
+                }
+            } else null
+            cachedFaceRegions = null
+            prefetchJob.await()
+        }
         Log.d("NextTiming", "RC openDownloaded done +${SystemClock.elapsedRealtime() - t0}ms")
         return loader
     }

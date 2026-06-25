@@ -180,6 +180,10 @@ class ContentUriImageLoader(
     @Throws(FileNotFoundException::class)
     override fun openInputStream(): InputStream? = contentResolver.openInputStream(uri)
 
+    // Call on an IO thread before handing the loader to the GL thread; subsequent
+    // getSize/getRotation/decode calls then return without any blocking I/O.
+    fun prefetch() { loadBytes() }
+
     private fun loadBytes(): ByteArray? {
         bytes?.let { return it }
         return try {

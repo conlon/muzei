@@ -118,8 +118,10 @@ class ArtworkLoadWorker(
         val contentUri = ProviderContract.getContentUri(authority)
         try {
             ContentProviderClientCompat.getClient(applicationContext, contentUri)?.use { client ->
+                Log.d("NextTiming", "Worker getLoadInfo +${SystemClock.elapsedRealtime() - t0}ms")
                 val result = client.call(METHOD_GET_LOAD_INFO)
                         ?: return@withContext Result.failure()
+                Log.d("NextTiming", "Worker getLoadInfo done +${SystemClock.elapsedRealtime() - t0}ms")
                 val maxLoadedArtworkId = result.getLong(KEY_MAX_LOADED_ARTWORK_ID, 0L)
                 val recentArtworkIds = result.getRecentIds(KEY_RECENT_ARTWORK_IDS)
                 val startingArtworkId = when (loadOrdering) {
@@ -130,19 +132,25 @@ class ArtworkLoadWorker(
                     // RANDOM means we never care about new artwork
                     ProviderManager.LoadOrdering.RANDOM -> Int.MAX_VALUE
                 }
+                Log.d("NextTiming", "Worker query-new +${SystemClock.elapsedRealtime() - t0}ms")
                 client.query(
                         contentUri,
                         selection = "_id > ?",
                         selectionArgs = arrayOf(startingArtworkId.toString()),
                         sortOrder = ProviderContract.Artwork._ID
                 )?.use { newArtwork ->
+                    Log.d("NextTiming", "Worker query-new done (${newArtwork.count}) +${SystemClock.elapsedRealtime() - t0}ms")
+                    Log.d("NextTiming", "Worker query-all +${SystemClock.elapsedRealtime() - t0}ms")
                     client.query(
                         contentUri,
                         sortOrder = ProviderContract.Artwork._ID
                     )?.use { allArtwork ->
+                        Log.d("NextTiming", "Worker query-all done (${allArtwork.count}) +${SystemClock.elapsedRealtime() - t0}ms")
                         // First prioritize new artwork
                         while (newArtwork.moveToNext()) {
+                            Log.d("NextTiming", "Worker checkValid ${newArtwork.position}/${newArtwork.count} +${SystemClock.elapsedRealtime() - t0}ms")
                             val validArtwork = checkForValidArtwork(client, contentUri, newArtwork)
+                            Log.d("NextTiming", "Worker checkValid done ${if (validArtwork != null) "OK" else "skip"} +${SystemClock.elapsedRealtime() - t0}ms")
                             if (validArtwork != null) {
                                 validArtwork.providerAuthority = authority
                                 val artworkId = database.artworkDao().insert(validArtwork)
@@ -172,7 +180,9 @@ class ArtworkLoadWorker(
                             }
                         }
                         // No new artwork, request that they load another in preparation for the next load
+                        Log.d("NextTiming", "Worker requestLoad +${SystemClock.elapsedRealtime() - t0}ms")
                         client.call(METHOD_REQUEST_LOAD)
+                        Log.d("NextTiming", "Worker requestLoad done +${SystemClock.elapsedRealtime() - t0}ms")
                         // Is there any artwork at all?
                         if (allArtwork.count == 0) {
                             Log.w(TAG, "Unable to find any artwork for $authority")
