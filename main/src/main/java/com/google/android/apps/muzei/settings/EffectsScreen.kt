@@ -18,7 +18,6 @@ package com.google.android.apps.muzei.settings
 
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,12 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -80,7 +74,6 @@ fun EffectsScreen(
     glitchChannelSplitPref: String = Prefs.PREF_GLITCH_CHANNEL_SPLIT,
     glitchPixelSortPref: String = Prefs.PREF_GLITCH_PIXEL_SORT,
     parallaxPref: String? = null,
-    showAutoFraming: Boolean = false,
     showFavoriteBoost: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -114,9 +107,6 @@ fun EffectsScreen(
     val parallax = parallaxPref?.let {
         rememberPreferenceSourcedValue(prefs, it, Prefs.DEFAULT_PARALLAX)
     }
-    val autoFraming = if (showAutoFraming) {
-        rememberPreferenceSourcedValue(prefs, Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
-    } else null
     val favoriteBoost = if (showFavoriteBoost) {
         rememberPreferenceSourcedValue(prefs, Prefs.PREF_FAVORITE_BOOST, Prefs.DEFAULT_FAVORITE_BOOST)
     } else null
@@ -157,8 +147,6 @@ fun EffectsScreen(
         parallax = parallax?.value,
         onParallaxChange = parallax?.let { p -> { value: Int -> p.value = value } },
         onParallaxChangeFinished = parallax?.let { p -> { p.userControlled = false } },
-        autoFramingEnabled = autoFraming?.value,
-        onAutoFramingChange = autoFraming?.let { af -> { value: Boolean -> af.value = value } },
         favoriteBoost = favoriteBoost?.value,
         onFavoriteBoostChange = favoriteBoost?.let { fb -> { value: Int -> fb.value = value } },
         onFavoriteBoostChangeFinished = favoriteBoost?.let { fb -> { fb.userControlled = false } },
@@ -204,8 +192,6 @@ fun EffectsScreen(
     parallax: Int? = null,
     onParallaxChange: ((Int) -> Unit)? = null,
     onParallaxChangeFinished: (() -> Unit)? = null,
-    autoFramingEnabled: Boolean? = null,
-    onAutoFramingChange: ((Boolean) -> Unit)? = null,
     favoriteBoost: Int? = null,
     onFavoriteBoostChange: ((Int) -> Unit)? = null,
     onFavoriteBoostChangeFinished: (() -> Unit)? = null,
@@ -221,7 +207,6 @@ fun EffectsScreen(
         Modifier.wrapContentHeight().padding(horizontal = 32.dp)
     }
     val isMosaic = effectMode == Prefs.EFFECT_MODE_MOSAIC
-    val showAutoFraming = autoFramingEnabled != null && onAutoFramingChange != null
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Top,
@@ -232,7 +217,7 @@ fun EffectsScreen(
             onModeChange = onEffectModeChange,
             modifier = contentModifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
+                .padding(bottom = 1.dp),
         )
         if (isMosaic) {
             MosaicShapeSelector(
@@ -240,14 +225,14 @@ fun EffectsScreen(
                 onShapeChange = onMosaicShapeChange,
                 modifier = contentModifier
                     .fillMaxWidth()
-                    .padding(bottom = 8.dp),
+                    .padding(bottom = 1.dp),
             )
             MosaicFilterSelector(
                 filter = mosaicFilter,
                 onFilterChange = onMosaicFilterChange,
                 modifier = contentModifier
                     .fillMaxWidth()
-                    .padding(bottom = 8.dp),
+                    .padding(bottom = 4.dp),
             )
         }
         EffectsGrid(
@@ -288,32 +273,6 @@ fun EffectsScreen(
             onFavoriteBoostChange = onFavoriteBoostChange,
             onFavoriteBoostChangeFinished = onFavoriteBoostChangeFinished,
         )
-        if (showAutoFraming) {
-            Row(
-                modifier = (if (windowSize.width >= 600.dp && windowSize.height >= 600.dp) {
-                    Modifier.sizeIn(maxWidth = 500.dp)
-                } else {
-                    Modifier.padding(horizontal = 32.dp)
-                }).fillMaxWidth().padding(top = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Checkbox(
-                    checked = autoFramingEnabled!!,
-                    onCheckedChange = onAutoFramingChange,
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = Color.White,
-                        uncheckedColor = Color.White,
-                        checkmarkColor = Color.Black
-                    )
-                )
-                Text(
-                    text = stringResource(R.string.settings_auto_framing_title),
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-            }
-        }
     }
 }
 
@@ -347,6 +306,7 @@ private fun EffectModeSelector(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MosaicShapeSelector(
     shape: String,
@@ -360,31 +320,31 @@ private fun MosaicShapeSelector(
         Prefs.MOSAIC_SHAPE_HEXAGON     to R.string.settings_mosaic_shape_hexagon,
         Prefs.MOSAIC_SHAPE_CIRCLE      to R.string.settings_mosaic_shape_circle,
     )
-
-    @Composable
-    fun ShapeChip(value: String, label: Int) {
-        FilterChip(
-            selected = shape == value,
-            onClick = { onShapeChange(value) },
-            label = { Text(text = stringResource(label)) },
-            colors = FilterChipDefaults.filterChipColors(
-                containerColor = Color.Transparent,
-                labelColor = Color.White,
-                selectedContainerColor = Color.White.copy(alpha = 0.18f),
-                selectedLabelColor = Color.White,
-            ),
-            border = FilterChipDefaults.filterChipBorder(
-                enabled = true,
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
                 selected = shape == value,
-                borderColor = Color.White.copy(alpha = 0.5f),
-                selectedBorderColor = Color.White,
-            ),
-        )
+                onClick = { onShapeChange(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = Color.White.copy(alpha = 0.18f),
+                    activeContentColor = Color.White,
+                    inactiveContainerColor = Color.Transparent,
+                    inactiveContentColor = Color.White,
+                ),
+                icon = {},
+            ) {
+                Text(
+                    text = stringResource(label),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
+        }
     }
-
-    FlowRow(modifier = modifier) { options.forEach { (v, l) -> ShapeChip(v, l) } }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MosaicFilterSelector(
     filter: String,
@@ -398,29 +358,28 @@ private fun MosaicFilterSelector(
         Prefs.MOSAIC_FILTER_GLITCH2   to R.string.settings_mosaic_filter_glitch2,
         Prefs.MOSAIC_FILTER_RECURSIVE to R.string.settings_mosaic_filter_recursive,
     )
-
-    @Composable
-    fun FilterChipItem(value: String, label: Int) {
-        FilterChip(
-            selected = filter == value,
-            onClick = { onFilterChange(value) },
-            label = { Text(text = stringResource(label)) },
-            colors = FilterChipDefaults.filterChipColors(
-                containerColor = Color.Transparent,
-                labelColor = Color.White,
-                selectedContainerColor = Color.White.copy(alpha = 0.18f),
-                selectedLabelColor = Color.White,
-            ),
-            border = FilterChipDefaults.filterChipBorder(
-                enabled = true,
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
                 selected = filter == value,
-                borderColor = Color.White.copy(alpha = 0.5f),
-                selectedBorderColor = Color.White,
-            ),
-        )
+                onClick = { onFilterChange(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = Color.White.copy(alpha = 0.18f),
+                    activeContentColor = Color.White,
+                    inactiveContainerColor = Color.Transparent,
+                    inactiveContentColor = Color.White,
+                ),
+                icon = {},
+            ) {
+                Text(
+                    text = stringResource(label),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
+        }
     }
-
-    FlowRow(modifier = modifier) { options.forEach { (v, l) -> FilterChipItem(v, l) } }
 }
 
 @Composable
@@ -480,14 +439,14 @@ private fun EffectsGrid(
                     if (isMosaic) R.string.settings_mosaic_amount_title
                     else R.string.settings_blur_amount_title
                 ),
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
             if (isMosaic) {
                 Text(
                     text = stringResource(R.string.settings_mosaic_opacity_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -495,45 +454,45 @@ private fun EffectsGrid(
             if (isGlitch) {
                 Text(
                     text = stringResource(R.string.settings_glitch_h_displacement_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = stringResource(R.string.settings_glitch_v_displacement_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = stringResource(R.string.settings_glitch_channel_split_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
                 Text(
                     text = stringResource(R.string.settings_glitch_pixel_sort_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
             Text(
                 text = stringResource(R.string.settings_dim_amount_title),
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
                 text = stringResource(R.string.settings_grey_amount_title),
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium
             )
             if (showParallax) {
                 Text(
                     text = stringResource(R.string.settings_parallax_amount_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -541,7 +500,7 @@ private fun EffectsGrid(
             if (showFavoriteBoost) {
                 Text(
                     text = stringResource(R.string.settings_favorite_boost_title),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
@@ -551,7 +510,7 @@ private fun EffectsGrid(
                 Slider(
                     value = mosaic.toFloat(),
                     onValueChange = { onMosaicChange(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onMosaicChangeFinished,
                     colors = sliderColors,
@@ -559,7 +518,7 @@ private fun EffectsGrid(
                 Slider(
                     value = mosaicOpacity.toFloat(),
                     onValueChange = { onMosaicOpacityChange(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onMosaicOpacityChangeFinished,
                     colors = sliderColors,
@@ -568,7 +527,7 @@ private fun EffectsGrid(
                     Slider(
                         value = glitchHDisplacement.toFloat(),
                         onValueChange = { onGlitchHDisplacementChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        modifier = Modifier.padding(vertical = 2.dp),
                         valueRange = 0f..500f,
                         onValueChangeFinished = onGlitchHDisplacementChangeFinished,
                         colors = sliderColors,
@@ -576,7 +535,7 @@ private fun EffectsGrid(
                     Slider(
                         value = glitchVDisplacement.toFloat(),
                         onValueChange = { onGlitchVDisplacementChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        modifier = Modifier.padding(vertical = 2.dp),
                         valueRange = 0f..500f,
                         onValueChangeFinished = onGlitchVDisplacementChangeFinished,
                         colors = sliderColors,
@@ -584,7 +543,7 @@ private fun EffectsGrid(
                     Slider(
                         value = glitchChannelSplit.toFloat(),
                         onValueChange = { onGlitchChannelSplitChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        modifier = Modifier.padding(vertical = 2.dp),
                         valueRange = 0f..500f,
                         onValueChangeFinished = onGlitchChannelSplitChangeFinished,
                         colors = sliderColors,
@@ -592,7 +551,7 @@ private fun EffectsGrid(
                     Slider(
                         value = glitchPixelSort.toFloat(),
                         onValueChange = { onGlitchPixelSortChange(it.toInt()) },
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        modifier = Modifier.padding(vertical = 2.dp),
                         valueRange = 0f..500f,
                         onValueChangeFinished = onGlitchPixelSortChangeFinished,
                         colors = sliderColors,
@@ -602,7 +561,7 @@ private fun EffectsGrid(
                 Slider(
                     value = blur.toFloat(),
                     onValueChange = { onBlurChange(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     valueRange = 0f..500f,
                     onValueChangeFinished = onBlurChangeFinished,
                     colors = sliderColors,
@@ -611,7 +570,7 @@ private fun EffectsGrid(
             Slider(
                 value = dim.toFloat(),
                 onValueChange = { onDimChange(it.toInt()) },
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
                 valueRange = 0f..255f,
                 onValueChangeFinished = onDimChangeFinished,
                 colors = sliderColors,
@@ -619,7 +578,7 @@ private fun EffectsGrid(
             Slider(
                 value = grey.toFloat(),
                 onValueChange = { onGreyChange(it.toInt()) },
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
                 valueRange = 0f..500f,
                 onValueChangeFinished = onGreyChangeFinished,
                 colors = sliderColors,
@@ -628,7 +587,7 @@ private fun EffectsGrid(
                 Slider(
                     value = parallax!!.toFloat(),
                     onValueChange = { onParallaxChange!!(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     valueRange = 0f..100f,
                     onValueChangeFinished = onParallaxChangeFinished,
                     colors = SliderDefaults.colors(
@@ -642,7 +601,7 @@ private fun EffectsGrid(
                 Slider(
                     value = favoriteBoost!!.toFloat(),
                     onValueChange = { onFavoriteBoostChange!!(it.toInt()) },
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    modifier = Modifier.padding(vertical = 2.dp),
                     valueRange = 0f..100f,
                     onValueChangeFinished = onFavoriteBoostChangeFinished,
                     colors = SliderDefaults.colors(

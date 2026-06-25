@@ -52,6 +52,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Devices.PHONE
 import androidx.compose.ui.tooling.preview.Devices.TABLET
@@ -75,6 +76,10 @@ fun EffectsSettings(
 ) {
     @Suppress("SpellCheckingInspection")
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    val autoFraming = rememberPreferenceSourcedValue(prefs, Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
+    val snackbarAutoFramingOn = stringResource(R.string.toast_auto_framing_on)
+    val snackbarAutoFramingOff = stringResource(R.string.toast_auto_framing_off)
 
     Scaffold(
         modifier = modifier,
@@ -83,7 +88,25 @@ fun EffectsSettings(
                 TopAppBar(
                     title = {},
                     navigationIcon = navigationIcon,
-                    actions = { EffectsSettingsActions(prefs, snackbarHostState, pagerState) },
+                    actions = {
+                        IconButton(onClick = {
+                            val nowEnabled = !autoFraming.value
+                            autoFraming.value = nowEnabled
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    message = if (nowEnabled) snackbarAutoFramingOn else snackbarAutoFramingOff,
+                                    duration = SnackbarDuration.Long,
+                                )
+                            }
+                        }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_auto_framing),
+                                contentDescription = stringResource(R.string.settings_auto_framing_title),
+                                tint = if (autoFraming.value) Color.White else Color.White.copy(alpha = 0.35f),
+                            )
+                        }
+                        EffectsSettingsActions(prefs, snackbarHostState, pagerState)
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
                         navigationIconContentColor = Color.White,
@@ -104,7 +127,6 @@ fun EffectsSettings(
                         )
                     }
                 ) {
-                    val coroutineScope = rememberCoroutineScope()
                     val tabs = listOf(
                         stringResource(R.string.settings_home_screen_title),
                         stringResource(R.string.settings_lock_screen_title),
@@ -172,7 +194,6 @@ fun EffectsSettings(
                 glitchChannelSplitPref = glitchChannelSplitPref,
                 glitchPixelSortPref = glitchPixelSortPref,
                 parallaxPref = parallaxPref,
-                showAutoFraming = page == 0,
                 showFavoriteBoost = page == 0,
                 modifier = Modifier.fillMaxSize(),
             )
