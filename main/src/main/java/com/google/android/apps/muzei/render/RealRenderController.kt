@@ -20,6 +20,8 @@ import android.content.ContentUris
 import android.content.Context
 import android.graphics.RectF
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.apps.muzei.api.MuzeiContract
 import com.google.android.apps.muzei.room.MuzeiDatabase
@@ -60,9 +62,14 @@ class RealRenderController(
                 renderer.pendingSavedViewport = pendingSavedViewportFor(artwork.imageUri)
                 return@collectIn
             }
+            val tFlow = SystemClock.elapsedRealtime()
+            Log.d("NextTiming", "RC emission ${artwork.imageUri.lastPathSegment}")
             currentArtworkUri = newUri
+            val tVp = SystemClock.elapsedRealtime()
             renderer.pendingSavedViewport = pendingSavedViewportFor(artwork.imageUri)
+            Log.d("NextTiming", "RC pendingSavedViewport +${SystemClock.elapsedRealtime() - tVp}ms (total +${SystemClock.elapsedRealtime() - tFlow}ms)")
             reloadCurrentArtwork()
+            Log.d("NextTiming", "RC reloadCurrentArtwork +${SystemClock.elapsedRealtime() - tFlow}ms")
         }
     }
 
@@ -109,6 +116,8 @@ class RealRenderController(
     }
 
     override suspend fun openDownloadedCurrentArtwork(): ContentUriImageLoader {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "RC openDownloaded entry ${currentArtworkUri.lastPathSegment}")
         val seed = try {
             ContentUris.parseId(currentArtworkUri)
         } catch (_: Exception) {
@@ -118,12 +127,22 @@ class RealRenderController(
         // Re-use any regions already computed in pendingSavedViewportFor (combined path)
         // so we never decode + run face detection twice for the same image load.
         renderer.pendingFaceRegions = if (renderer.wantsSubjectRegions()) {
-            cachedFaceRegions ?: AutoFramingEngine.detectFaceRegions(
-                    context.contentResolver, currentArtworkUri)
+            val cached = cachedFaceRegions
+            if (cached != null) {
+                Log.d("NextTiming", "RC faceRegions cache-hit +${SystemClock.elapsedRealtime() - t0}ms")
+                cached
+            } else {
+                Log.d("NextTiming", "RC faceRegions cache-miss, running detectFaceRegions")
+                val result = AutoFramingEngine.detectFaceRegions(
+                        context.contentResolver, currentArtworkUri)
+                Log.d("NextTiming", "RC detectFaceRegions done +${SystemClock.elapsedRealtime() - t0}ms")
+                result
+            }
         } else {
             null
         }
         cachedFaceRegions = null
+        Log.d("NextTiming", "RC openDownloaded done +${SystemClock.elapsedRealtime() - t0}ms")
         return ContentUriImageLoader(context.contentResolver, currentArtworkUri, seed)
     }
 }

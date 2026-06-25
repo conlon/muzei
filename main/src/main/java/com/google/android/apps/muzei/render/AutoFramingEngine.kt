@@ -20,6 +20,7 @@ import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.RectF
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
@@ -48,9 +49,12 @@ object AutoFramingEngine {
             contentResolver: ContentResolver,
             artworkUri: Uri
     ): List<RectF> = withContext(Dispatchers.IO) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "AFE detectFaceRegions start ${artworkUri.lastPathSegment}")
         try {
             val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
                     .decode(DECODE_SIZE) ?: return@withContext emptyList()
+            Log.d("NextTiming", "AFE detectFaceRegions decode +${SystemClock.elapsedRealtime() - t0}ms")
             val imageWidth = bitmap.width.toFloat()
             val imageHeight = bitmap.height.toFloat()
             if (imageWidth == 0f || imageHeight == 0f) {
@@ -67,6 +71,7 @@ object AutoFramingEngine {
             } catch (_: Exception) {
                 emptyList()
             }
+            Log.d("NextTiming", "AFE detectFaceRegions face-await +${SystemClock.elapsedRealtime() - t0}ms (${faces.size} faces)")
             faceDetector.close()
             bitmap.recycle()
             faces.map { face ->
@@ -85,11 +90,15 @@ object AutoFramingEngine {
             artworkUri: Uri,
             screenAspectRatio: Float
     ): RectF? = withContext(Dispatchers.IO) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "AFE computeFraming start ${artworkUri.lastPathSegment}")
         try {
             val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
                     .decode(DECODE_SIZE) ?: return@withContext null
+            Log.d("NextTiming", "AFE computeFraming decode +${SystemClock.elapsedRealtime() - t0}ms")
             val result = detectSubjects(bitmap, screenAspectRatio)
             bitmap.recycle()
+            Log.d("NextTiming", "AFE computeFraming done +${SystemClock.elapsedRealtime() - t0}ms")
             result
         } catch (e: Exception) {
             Log.w(TAG, "Auto-framing failed", e)
@@ -109,9 +118,12 @@ object AutoFramingEngine {
             artworkUri: Uri,
             screenAspectRatio: Float
     ): Pair<RectF?, List<RectF>> = withContext(Dispatchers.IO) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "AFE computeFramingAndFaceRegions start ${artworkUri.lastPathSegment}")
         try {
             val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
                     .decode(DECODE_SIZE) ?: return@withContext Pair(null, emptyList())
+            Log.d("NextTiming", "AFE framing+face decode +${SystemClock.elapsedRealtime() - t0}ms")
             val imageWidth = bitmap.width.toFloat()
             val imageHeight = bitmap.height.toFloat()
             if (imageWidth == 0f || imageHeight == 0f) {
@@ -129,6 +141,7 @@ object AutoFramingEngine {
             } catch (_: Exception) {
                 emptyList()
             }
+            Log.d("NextTiming", "AFE framing+face face-await +${SystemClock.elapsedRealtime() - t0}ms (${faces.size} faces)")
             faceDetector.close()
             val faceBounds = faces.map { face ->
                 val b = face.boundingBox
@@ -147,6 +160,7 @@ object AutoFramingEngine {
             } catch (_: Exception) {
                 emptyList()
             }
+            Log.d("NextTiming", "AFE framing+face object-await +${SystemClock.elapsedRealtime() - t0}ms (${objects.size} objects)")
             objectDetector.close()
             val objectBounds = objects.map { obj ->
                 val b = obj.boundingBox

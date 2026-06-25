@@ -26,6 +26,7 @@ import android.graphics.RectF
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.os.SystemClock
 import android.util.Log
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.annotation.Keep
@@ -447,7 +448,10 @@ class MuzeiBlurRenderer(
             return
         }
 
+        val tLoad = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "GL setAndConsume entry")
         val (width, height) = imageLoader.getSize()
+        Log.d("NextTiming", "GL getSize +${SystemClock.elapsedRealtime() - tLoad}ms (${width}x${height})")
         if (width == 0 || height == 0) {
             return
         }
@@ -473,6 +477,7 @@ class MuzeiBlurRenderer(
         }
 
         nextGLPictureSet.load(imageLoader)
+        Log.d("NextTiming", "GL load done +${SystemClock.elapsedRealtime() - tLoad}ms, starting crossfade")
 
         crossfadeAnimator.start(if (immediate) 1 else 0, 1) {
             // swap current and next picturesets
@@ -509,7 +514,10 @@ class MuzeiBlurRenderer(
         private var deferredEffectLoader: ImageLoader? = null
 
         fun load(imageLoader: ImageLoader) {
+            val tLoad = SystemClock.elapsedRealtime()
+            Log.d("NextTiming", "GL load entry")
             val (width, height) = imageLoader.getSize()
+            Log.d("NextTiming", "GL load getSize +${SystemClock.elapsedRealtime() - tLoad}ms")
             hasBitmap = width != 0 && height != 0
             bitmapAspectRatio = if (hasBitmap)
                 width * 1f / height
@@ -523,6 +531,7 @@ class MuzeiBlurRenderer(
             if (hasBitmap) {
                 // Calculate image darkness to determine dim amount
                 var tempBitmap = imageLoader.decode(64)
+                Log.d("NextTiming", "GL load decode64 +${SystemClock.elapsedRealtime() - tLoad}ms")
                 val darkness = tempBitmap.darkness()
                 dimAmount = if (demoMode)
                     DEMO_DIM
@@ -548,6 +557,7 @@ class MuzeiBlurRenderer(
                                 "was too large, trying a sample size of $sampleSize")
                     }
                 } while (!success)
+                Log.d("NextTiming", "GL load sharp-decode +${SystemClock.elapsedRealtime() - tLoad}ms (sampleSize=$sampleSize)")
                 val isGlitchFilter = currentMosaicFilter == MosaicFilter.GLITCH1 ||
                         currentMosaicFilter == MosaicFilter.GLITCH2
                 val mosaicActive = currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&

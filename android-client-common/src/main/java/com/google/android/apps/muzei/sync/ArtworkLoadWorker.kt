@@ -20,6 +20,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.database.Cursor
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.BaseColumns
 import android.util.Log
 import androidx.work.Constraints
@@ -101,8 +102,11 @@ class ArtworkLoadWorker(
     }
 
     override suspend fun doWork() = withContext(syncSingleThreadContext) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "Worker entry")
         // Throttle artwork loads
         delay(ARTWORK_LOAD_THROTTLE)
+        Log.d("NextTiming", "Worker post-throttle +${SystemClock.elapsedRealtime() - t0}ms")
         // Now actually load the artwork
         val database = MuzeiDatabase.getInstance(applicationContext)
         val (authority) = database.providerDao()
@@ -144,6 +148,7 @@ class ArtworkLoadWorker(
                                 val artworkId = database.artworkDao().insert(validArtwork)
                                 database.imageMetadataDao().ensureRow(
                                         ImageMetadata(validArtwork.imageUri, authority))
+                                Log.d("NextTiming", "Worker inserted artwork ${validArtwork.imageUri.lastPathSegment} +${SystemClock.elapsedRealtime() - t0}ms")
                                 if (BuildConfig.DEBUG) {
                                     Log.d(TAG, "Loaded ${validArtwork.imageUri} into id $artworkId")
                                 }
