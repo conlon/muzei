@@ -26,7 +26,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 /**
  * Database for accessing Gallery data
  */
-@Database(entities = [(ChosenPhoto::class), (Metadata::class)], version = 7)
+@Database(entities = [(ChosenPhoto::class), (Metadata::class)], version = 8)
 internal abstract class GalleryDatabase : RoomDatabase() {
 
     companion object {
@@ -47,7 +47,8 @@ internal abstract class GalleryDatabase : RoomDatabase() {
                                 MIGRATION_3_4,
                                 MIGRATION_4_5,
                                 MIGRATION_5_6,
-                                MIGRATION_6_7)
+                                MIGRATION_6_7,
+                                MIGRATION_7_8)
                         .build()
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -121,6 +122,12 @@ internal abstract class GalleryDatabase : RoomDatabase() {
                 db.execSQL("DROP TABLE metadata_cache")
                 db.execSQL("ALTER TABLE metadata_cache2 RENAME TO metadata_cache")
                 db.execSQL("CREATE UNIQUE INDEX index_metadata_cache_uri " + "ON metadata_cache (uri)")
+            }
+        }
+
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chosen_photos ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
             }
         }
 

@@ -26,6 +26,7 @@ import android.graphics.RectF
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.os.SystemClock
 import android.util.Log
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.annotation.Keep
@@ -38,6 +39,7 @@ import com.google.android.apps.muzei.util.TickingFloatAnimator
 import com.google.android.apps.muzei.util.constrain
 import com.google.android.apps.muzei.util.floorEven
 import com.google.android.apps.muzei.util.interpolate
+import com.google.android.apps.muzei.util.MosaicFilter
 import com.google.android.apps.muzei.util.MosaicShape
 import com.google.android.apps.muzei.util.mosaicBitmap
 import com.google.android.apps.muzei.util.roundMult4
@@ -81,16 +83,20 @@ class MuzeiBlurRenderer(
         const val DEFAULT_MAX_DIM = 128 // technical max 255
         const val DEFAULT_MOSAIC = 100 // max 500
         const val DEFAULT_MOSAIC_OPACITY = 500 // max 500; 500 = full mosaic (preserves existing look)
+        const val DEFAULT_GLITCH_H_DISPLACEMENT = 250  // max 500
+        const val DEFAULT_GLITCH_V_DISPLACEMENT = 250  // max 500
+        const val DEFAULT_GLITCH_CHANNEL_SPLIT = 250 // max 500
+        const val DEFAULT_GLITCH_PIXEL_SORT = 250    // max 500
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
         const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
+        const val DEFAULT_MOSAIC_FILTER = Prefs.MOSAIC_FILTER_NONE
         private const val DEMO_BLUR = 250
         private const val DEMO_DIM = 64
         private const val DEMO_GREY = 0
         private const val DIM_RANGE = 0.5f // percent of max dim
         // At max amount, mosaic tile size = this fraction of source bitmap height.
-        // ~0.20 => ~5 tiles vertically at max, which reads as obviously mosaic'd
-        // without becoming unrecognisable.
-        private const val MOSAIC_MAX_TILE_FRACTION = 0.20f
+        // ~0.10 => ~10 tiles vertically at max.
+        private const val MOSAIC_MAX_TILE_FRACTION = 0.10f
     }
 
     private val blurKeyframes: Int
@@ -100,8 +106,13 @@ class MuzeiBlurRenderer(
     private var maxGrey: Int = 0
     private var mosaicAmount: Int = DEFAULT_MOSAIC
     private var mosaicOpacity: Int = DEFAULT_MOSAIC_OPACITY
+    private var glitchHDisplacement: Int = DEFAULT_GLITCH_H_DISPLACEMENT
+    private var glitchVDisplacement: Int = DEFAULT_GLITCH_V_DISPLACEMENT
+    private var glitchChannelSplit: Int = DEFAULT_GLITCH_CHANNEL_SPLIT
+    private var glitchPixelSort: Int = DEFAULT_GLITCH_PIXEL_SORT
     private var currentEffectMode: String = DEFAULT_EFFECT_MODE
     private var currentMosaicShape: MosaicShape = MosaicShape.SQUARE
+    private var currentMosaicFilter: MosaicFilter = MosaicFilter.NONE
     private var mosaicRandom: Boolean = false
 
     // Model and view matrices. Projection and MVP stored in picture set
@@ -126,6 +137,13 @@ class MuzeiBlurRenderer(
     private var zoomAmount: Float = 1f
     @Volatile
     var pendingSavedViewport: RectF? = null
+    @Volatile
+    var pendingFaceRegions: List<RectF>? = null
+
+    /** True when the active effect will consume face region data (i.e. GLITCH2 is selected). */
+    fun wantsSubjectRegions(): Boolean =
+            currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&
+            currentMosaicFilter == MosaicFilter.GLITCH2
     private val currentViewport = RectF() // [-1, -1] to [1, 1], flipped
 
     var isBlurred = true
@@ -135,8 +153,13 @@ class MuzeiBlurRenderer(
     private var greyPreferenceName = Prefs.PREF_GREY_AMOUNT
     private var mosaicPreferenceName = Prefs.PREF_MOSAIC_AMOUNT
     private var mosaicOpacityPreferenceName = Prefs.PREF_MOSAIC_OPACITY
+    private var glitchHDisplacementPreferenceName = Prefs.PREF_GLITCH_H_DISPLACEMENT
+    private var glitchVDisplacementPreferenceName = Prefs.PREF_GLITCH_V_DISPLACEMENT
+    private var glitchChannelSplitPreferenceName = Prefs.PREF_GLITCH_CHANNEL_SPLIT
+    private var glitchPixelSortPreferenceName = Prefs.PREF_GLITCH_PIXEL_SORT
     private var effectModePreferenceName = Prefs.PREF_EFFECT_MODE
     private var mosaicShapePreferenceName = Prefs.PREF_MOSAIC_SHAPE
+    private var mosaicFilterPreferenceName = Prefs.PREF_MOSAIC_FILTER
     private var blurRelatedToArtDetailMode = false
     private val blurInterpolator = AccelerateDecelerateInterpolator()
     private val blurAnimator = TickingFloatAnimator(BLUR_ANIMATION_DURATION * if (demoMode) 5 else 1)
@@ -156,8 +179,13 @@ class MuzeiBlurRenderer(
         recomputeGreyAmount()
         recomputeMosaicAmount()
         recomputeMosaicOpacity()
+        recomputeGlitchHDisplacement()
+        recomputeGlitchVDisplacement()
+        recomputeGlitchChannelSplit()
+        recomputeGlitchPixelSort()
         recomputeEffectMode()
         recomputeMosaicShape()
+        recomputeMosaicFilter()
     }
 
     fun recomputeMaxPrescaledBlurPixels(
@@ -217,6 +245,42 @@ class MuzeiBlurRenderer(
                 .coerceIn(0, 500)
     }
 
+    fun recomputeGlitchHDisplacement(
+            newGlitchHDisplacementPreferenceName: String = glitchHDisplacementPreferenceName
+    ) {
+        glitchHDisplacementPreferenceName = newGlitchHDisplacementPreferenceName
+        glitchHDisplacement = Prefs.getSharedPreferences(context)
+                .getInt(glitchHDisplacementPreferenceName, DEFAULT_GLITCH_H_DISPLACEMENT)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchVDisplacement(
+            newGlitchVDisplacementPreferenceName: String = glitchVDisplacementPreferenceName
+    ) {
+        glitchVDisplacementPreferenceName = newGlitchVDisplacementPreferenceName
+        glitchVDisplacement = Prefs.getSharedPreferences(context)
+                .getInt(glitchVDisplacementPreferenceName, DEFAULT_GLITCH_V_DISPLACEMENT)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchChannelSplit(
+            newGlitchChannelSplitPreferenceName: String = glitchChannelSplitPreferenceName
+    ) {
+        glitchChannelSplitPreferenceName = newGlitchChannelSplitPreferenceName
+        glitchChannelSplit = Prefs.getSharedPreferences(context)
+                .getInt(glitchChannelSplitPreferenceName, DEFAULT_GLITCH_CHANNEL_SPLIT)
+                .coerceIn(0, 500)
+    }
+
+    fun recomputeGlitchPixelSort(
+            newGlitchPixelSortPreferenceName: String = glitchPixelSortPreferenceName
+    ) {
+        glitchPixelSortPreferenceName = newGlitchPixelSortPreferenceName
+        glitchPixelSort = Prefs.getSharedPreferences(context)
+                .getInt(glitchPixelSortPreferenceName, DEFAULT_GLITCH_PIXEL_SORT)
+                .coerceIn(0, 500)
+    }
+
     fun recomputeEffectMode(
             newEffectModePreferenceName: String = effectModePreferenceName
     ) {
@@ -235,13 +299,28 @@ class MuzeiBlurRenderer(
                 ?: DEFAULT_MOSAIC_SHAPE
         mosaicRandom = raw == Prefs.MOSAIC_SHAPE_RANDOM
         currentMosaicShape = when (raw) {
-            Prefs.MOSAIC_SHAPE_TRIANGLE -> MosaicShape.TRIANGLE
-            Prefs.MOSAIC_SHAPE_HEXAGON -> MosaicShape.HEXAGON
-            Prefs.MOSAIC_SHAPE_MIXED1 -> MosaicShape.MIXED1
-            Prefs.MOSAIC_SHAPE_MIXED2 -> MosaicShape.MIXED2
-            Prefs.MOSAIC_SHAPE_MIXED3 -> MosaicShape.MIXED3
-            Prefs.MOSAIC_SHAPE_MIXED4 -> MosaicShape.MIXED4
-            else -> MosaicShape.SQUARE
+            Prefs.MOSAIC_SHAPE_EQUILATERAL -> MosaicShape.EQUILATERAL
+            Prefs.MOSAIC_SHAPE_IRREGULAR   -> MosaicShape.IRREGULAR
+            Prefs.MOSAIC_SHAPE_HEXAGON     -> MosaicShape.HEXAGON
+            Prefs.MOSAIC_SHAPE_CIRCLE      -> MosaicShape.CIRCLE
+            Prefs.MOSAIC_SHAPE_RANDOM      -> MosaicShape.RANDOM
+            else                           -> MosaicShape.SQUARE
+        }
+    }
+
+    fun recomputeMosaicFilter(
+            newMosaicFilterPreferenceName: String = mosaicFilterPreferenceName
+    ) {
+        mosaicFilterPreferenceName = newMosaicFilterPreferenceName
+        val raw = Prefs.getSharedPreferences(context)
+                .getString(mosaicFilterPreferenceName, DEFAULT_MOSAIC_FILTER)
+                ?: DEFAULT_MOSAIC_FILTER
+        currentMosaicFilter = when (raw) {
+            Prefs.MOSAIC_FILTER_RAINDROP  -> MosaicFilter.RAINDROP
+            Prefs.MOSAIC_FILTER_GLITCH1   -> MosaicFilter.GLITCH1
+            Prefs.MOSAIC_FILTER_GLITCH2   -> MosaicFilter.GLITCH2
+            Prefs.MOSAIC_FILTER_RECURSIVE -> MosaicFilter.RECURSIVE
+            else                          -> MosaicFilter.NONE
         }
     }
 
@@ -369,7 +448,10 @@ class MuzeiBlurRenderer(
             return
         }
 
+        val tLoad = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "GL setAndConsume entry")
         val (width, height) = imageLoader.getSize()
+        Log.d("NextTiming", "GL getSize +${SystemClock.elapsedRealtime() - tLoad}ms (${width}x${height})")
         if (width == 0 || height == 0) {
             return
         }
@@ -384,6 +466,7 @@ class MuzeiBlurRenderer(
             ArtworkSizeStateFlow.value = ArtworkSize(width, height)
             val savedViewport = pendingSavedViewport
             nextGLPictureSet.savedViewport = savedViewport
+            nextGLPictureSet.faceRegions = pendingFaceRegions
             if (savedViewport != null) {
                 ArtDetailViewport.setViewport(nextGLPictureSet.id, savedViewport)
             } else {
@@ -394,6 +477,7 @@ class MuzeiBlurRenderer(
         }
 
         nextGLPictureSet.load(imageLoader)
+        Log.d("NextTiming", "GL load done +${SystemClock.elapsedRealtime() - tLoad}ms, starting crossfade")
 
         crossfadeAnimator.start(if (immediate) 1 else 0, 1) {
             // swap current and next picturesets
@@ -415,6 +499,32 @@ class MuzeiBlurRenderer(
         callbacks.requestRender()
     }
 
+    /**
+     * Called from [com.google.android.apps.muzei.render.RealRenderController] when async
+     * auto-framing completes for the current image. Must run on the GL thread.
+     *
+     * Updates the current picture set's saved viewport (which drives the sharp-state
+     * rendering) and triggers a re-render so the crop settles onto the subject a beat
+     * after the photo appeared.
+     */
+    fun applyAutoFramedViewport(viewport: RectF) {
+        currentGLPictureSet.savedViewport = viewport
+        ArtDetailViewport.setViewport(currentGLPictureSet.id, viewport)
+        callbacks.requestRender()
+    }
+
+    /**
+     * Called from [com.google.android.apps.muzei.render.RealRenderController] when async
+     * face detection completes for the current image. Must run on the GL thread.
+     *
+     * Stores face regions on the current picture set so they are available when
+     * [GLPictureSet.bakeDeferredEffects] fires (when the renderer transitions to blurred).
+     */
+    fun applyAsyncFaceRegions(faceRegions: List<RectF>?) {
+        pendingFaceRegions = faceRegions
+        currentGLPictureSet.faceRegions = faceRegions
+    }
+
     private inner class GLPictureSet(val id: Int) {
         private val projectionMatrix = FloatArray(16)
         private val mvpMatrix = FloatArray(16)
@@ -423,9 +533,17 @@ class MuzeiBlurRenderer(
         private var bitmapAspectRatio = 1f
         var dimAmount = 0
         var savedViewport: RectF? = null
+        var faceRegions: List<RectF>? = null
+        // True when effect frames (1..blurKeyframes) have been deferred because the
+        // renderer was sharp at load time. bakeDeferredEffects() completes them.
+        private var effectsDeferred = false
+        private var deferredEffectLoader: ImageLoader? = null
 
         fun load(imageLoader: ImageLoader) {
+            val tLoad = SystemClock.elapsedRealtime()
+            Log.d("NextTiming", "GL load entry")
             val (width, height) = imageLoader.getSize()
+            Log.d("NextTiming", "GL load getSize +${SystemClock.elapsedRealtime() - tLoad}ms")
             hasBitmap = width != 0 && height != 0
             bitmapAspectRatio = if (hasBitmap)
                 width * 1f / height
@@ -439,6 +557,7 @@ class MuzeiBlurRenderer(
             if (hasBitmap) {
                 // Calculate image darkness to determine dim amount
                 var tempBitmap = imageLoader.decode(64)
+                Log.d("NextTiming", "GL load decode64 +${SystemClock.elapsedRealtime() - tLoad}ms")
                 val darkness = tempBitmap.darkness()
                 dimAmount = if (demoMode)
                     DEMO_DIM
@@ -464,57 +583,35 @@ class MuzeiBlurRenderer(
                                 "was too large, trying a sample size of $sampleSize")
                     }
                 } while (!success)
+                Log.d("NextTiming", "GL load sharp-decode +${SystemClock.elapsedRealtime() - tLoad}ms (sampleSize=$sampleSize)")
+                val isGlitchFilter = currentMosaicFilter == MosaicFilter.GLITCH1 ||
+                        currentMosaicFilter == MosaicFilter.GLITCH2
                 val mosaicActive = currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&
-                        mosaicAmount > 0
+                        (mosaicAmount > 0 || isGlitchFilter)
                 val blurActive = currentEffectMode == Prefs.EFFECT_MODE_BLUR &&
                         maxPrescaledBlurPixels > 0
-                if (!mosaicActive && !blurActive && maxGrey == 0) {
+                val effectsNeeded = mosaicActive || blurActive || maxGrey > 0
+                if (!effectsNeeded) {
+                    // No effect configured — alias all effect frames to the sharp frame.
+                    effectsDeferred = false
+                    deferredEffectLoader = null
                     for (f in 1..blurKeyframes) {
                         pictures[f] = pictures[0]
                     }
+                } else if (!isBlurred && !demoMode && !preview) {
+                    // Effects needed but renderer is currently sharp (art detail open,
+                    // or temporary-focus tap). Defer the expensive bake until the
+                    // renderer transitions back to blurred — work wasted while invisible.
+                    for (f in 1..blurKeyframes) {
+                        pictures[f] = pictures[0]  // safe fallback if blur briefly > 0
+                    }
+                    effectsDeferred = true
+                    deferredEffectLoader = imageLoader
                 } else {
-                    val sampleSizeTargetHeight: Int = if (blurActive) {
-                        currentHeight / blurredSampleSize
-                    } else {
-                        currentHeight
-                    }
-                    // Note that image width should be a multiple of 4 to avoid
-                    // issues with RenderScript allocations.
-                    val scaledHeight = max(2, sampleSizeTargetHeight.floorEven())
-                    val scaledWidth = max(4, (scaledHeight * bitmapAspectRatio).toInt().roundMult4())
-
-                    // Load the entire bitmap region at a sample size appropriate for the
-                    // final effect (blurred or mosaic'd) image.
-                    tempBitmap = imageLoader.decode(scaledWidth, scaledHeight)
-
-                    if (tempBitmap != null
-                            && tempBitmap.width != 0 && tempBitmap.height != 0) {
-                        // Note that image width should be a multiple of 4 to avoid
-                        // issues with RenderScript allocations.
-                        val scaledBitmap = tempBitmap.scale(scaledWidth, scaledHeight)
-                        if (tempBitmap != scaledBitmap) {
-                            tempBitmap.recycle()
-                        }
-
-                        if (mosaicActive) {
-                            val effectiveShape = if (mosaicRandom) {
-                                val allShapes = MosaicShape.values()
-                                allShapes[Random(imageLoader.seed).nextInt(allShapes.size)]
-                            } else {
-                                currentMosaicShape
-                            }
-                            generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape)
-                        } else {
-                            generateBlurKeyframes(scaledBitmap)
-                        }
-
-                        scaledBitmap.recycle()
-                    } else {
-                        Log.e(TAG, "ImageLoader failed to decode the image")
-                        for (f in 1..blurKeyframes) {
-                            pictures[f] = null
-                        }
-                    }
+                    // Renderer is blurred (or demo/preview) — bake eagerly.
+                    effectsDeferred = false
+                    deferredEffectLoader = null
+                    bakeEffectKeyframes(imageLoader)
                 }
             }
 
@@ -661,6 +758,83 @@ class MuzeiBlurRenderer(
             }
         }
 
+        /**
+         * Bakes the effect keyframes (frames 1..blurKeyframes) from [imageLoader].
+         * Called either eagerly inside [load] (when the renderer is already blurred)
+         * or lazily from [bakeDeferredEffects] when the renderer transitions to blurred.
+         *
+         * Callers are responsible for ensuring pictures[1..blurKeyframes] are null
+         * (not aliased) before calling this.
+         */
+        private fun bakeEffectKeyframes(imageLoader: ImageLoader) {
+            val isGlitchFilter = currentMosaicFilter == MosaicFilter.GLITCH1 ||
+                    currentMosaicFilter == MosaicFilter.GLITCH2
+            val mosaicActive = currentEffectMode == Prefs.EFFECT_MODE_MOSAIC &&
+                    (mosaicAmount > 0 || isGlitchFilter)
+            val blurActive = currentEffectMode == Prefs.EFFECT_MODE_BLUR &&
+                    maxPrescaledBlurPixels > 0
+
+            val sampleSizeTargetHeight: Int = if (blurActive) {
+                currentHeight / blurredSampleSize
+            } else {
+                currentHeight
+            }
+            // Note that image width should be a multiple of 4 to avoid
+            // issues with RenderScript allocations.
+            val scaledHeight = max(2, sampleSizeTargetHeight.floorEven())
+            val scaledWidth = max(4, (scaledHeight * bitmapAspectRatio).toInt().roundMult4())
+
+            // Load the entire bitmap region at a sample size appropriate for the
+            // final effect (blurred or mosaic'd) image.
+            val tempBitmap = imageLoader.decode(scaledWidth, scaledHeight)
+
+            if (tempBitmap != null && tempBitmap.width != 0 && tempBitmap.height != 0) {
+                // Note that image width should be a multiple of 4 to avoid
+                // issues with RenderScript allocations.
+                val scaledBitmap = tempBitmap.scale(scaledWidth, scaledHeight)
+                if (tempBitmap != scaledBitmap) {
+                    tempBitmap.recycle()
+                }
+
+                if (mosaicActive) {
+                    val effectiveShape = if (mosaicRandom) {
+                        val allShapes = MosaicShape.values()
+                        allShapes[Random(imageLoader.seed).nextInt(allShapes.size)]
+                    } else {
+                        currentMosaicShape
+                    }
+                    generateMosaicKeyframes(scaledBitmap, scaledHeight, effectiveShape, currentMosaicFilter, faceRegions)
+                } else {
+                    generateBlurKeyframes(scaledBitmap)
+                }
+
+                scaledBitmap.recycle()
+            } else {
+                Log.e(TAG, "ImageLoader failed to decode the image")
+                for (f in 1..blurKeyframes) {
+                    pictures[f] = null
+                }
+            }
+        }
+
+        /**
+         * Completes a deferred effect bake. Called from [setIsBlurred] when the renderer
+         * transitions back to blurred — the one moment the effect frames become visible.
+         * No-ops if no bake was deferred.
+         */
+        fun bakeDeferredEffects() {
+            if (!effectsDeferred) return
+            val loader = deferredEffectLoader ?: return
+            effectsDeferred = false
+            deferredEffectLoader = null
+            // Null out the aliased slots before baking real effect frames so that
+            // destroyPictures won't double-free them against pictures[0].
+            for (f in 1..blurKeyframes) {
+                pictures[f] = null
+            }
+            bakeEffectKeyframes(loader)
+        }
+
         private fun generateBlurKeyframes(scaledBitmap: android.graphics.Bitmap) {
             val blurrer = ImageBlurrer(context, scaledBitmap)
             for (f in 1..blurKeyframes) {
@@ -701,19 +875,64 @@ class MuzeiBlurRenderer(
             }
         }
 
+        /**
+         * Attempt to render a mosaic frame, falling back gracefully on failure.
+         *
+         * First try: full-resolution tile. On [Throwable] (incl. [OutOfMemoryError]),
+         * retry once with a doubled tile (half the output cells, far less memory).
+         * If the retry also fails, return null so the caller can fall back to
+         * [pictures][0] (the sharp original).
+         */
+        private fun tryMosaicBitmap(
+            source: android.graphics.Bitmap,
+            tilePx: Int,
+            shape: MosaicShape,
+            filter: MosaicFilter,
+            frameIndex: Int,
+            subjectRegions: List<RectF>? = null,
+        ): android.graphics.Bitmap? {
+            return try {
+                mosaicBitmap(source, tilePx, shape, filter,
+                    glitchHDisplacement, glitchVDisplacement, glitchChannelSplit, glitchPixelSort,
+                    subjectRegions)
+            } catch (firstErr: Throwable) {
+                Log.e(TAG, "Mosaic frame $frameIndex failed (tile=$tilePx shape=$shape filter=$filter), retrying at 2× tile", firstErr)
+                // Retry: double the tile size to cut memory roughly in half; clamp
+                // glitch displacement to a safe mid-range so extreme values don't OOM.
+                val safeH = glitchHDisplacement.coerceAtMost(250)
+                val safeV = glitchVDisplacement.coerceAtMost(250)
+                try {
+                    mosaicBitmap(source, tilePx * 2, shape, filter,
+                        safeH, safeV, glitchChannelSplit, glitchPixelSort,
+                        subjectRegions)
+                } catch (secondErr: Throwable) {
+                    Log.e(TAG, "Mosaic frame $frameIndex retry also failed; falling back to sharp photo", secondErr)
+                    null  // caller will use pictures[0]
+                }
+            }
+        }
+
         private fun generateMosaicKeyframes(
             scaledBitmap: android.graphics.Bitmap,
             scaledHeight: Int,
             effectiveShape: MosaicShape,
+            effectiveFilter: MosaicFilter,
+            subjectRegions: List<RectF>? = null,
         ) {
             val visibleImageHeightFraction = staticVisibleHeightFraction()
             for (f in 1..blurKeyframes) {
                 val tilePx = mosaicTilePixelsAtFrame(scaledHeight, f, visibleImageHeightFraction)
-                val pixelated = mosaicBitmap(scaledBitmap, tilePx, effectiveShape)
+                val pixelated = tryMosaicBitmap(scaledBitmap, tilePx, effectiveShape, effectiveFilter, f, subjectRegions)
+
+                // If mosaic generation failed entirely, fall back to the sharp photo for this frame.
+                if (pixelated == null) {
+                    pictures[f] = pictures[0]
+                    continue
+                }
 
                 // Blend the mosaic over the (original) scaled photo when opacity < 500.
                 // This respects grey (desaturate step below) and dim (draw-time overlay).
-                val blended = if (mosaicOpacity < 500 && pixelated != null) {
+                val blended = if (mosaicOpacity < 500) {
                     val config = scaledBitmap.config ?: Bitmap.Config.ARGB_8888
                     val composite = Bitmap.createBitmap(scaledBitmap.width, scaledBitmap.height, config)
                     val compositeCanvas = Canvas(composite)
@@ -735,7 +954,7 @@ class MuzeiBlurRenderer(
                 }
 
                 val desaturateAmount = maxGrey / 500f * f / blurKeyframes
-                val finalBitmap = if (desaturateAmount > 0f && blended != null) {
+                val finalBitmap = if (desaturateAmount > 0f) {
                     val blurrer = ImageBlurrer(context, blended)
                     val out = blurrer.blurBitmap(0f, desaturateAmount)
                     blurrer.destroy()
@@ -750,12 +969,21 @@ class MuzeiBlurRenderer(
         }
 
         fun destroyPictures() {
+            // Use identity comparison to avoid double-destroying aliased frames.
+            // Deferral aliases pictures[1..blurKeyframes] to pictures[0]; the mosaic
+            // OOM fallback (generateMosaicKeyframes) can also alias a frame to pictures[0].
+            val seen = ArrayList<GLPicture>(pictures.size)
             for (i in pictures.indices) {
-                if (pictures[i] != null) {
-                    pictures[i]?.destroy()
-                    pictures[i] = null
+                val pic = pictures[i]
+                pictures[i] = null
+                if (pic != null && seen.none { it === pic }) {
+                    seen.add(pic)
+                    pic.destroy()
                 }
             }
+            // Reset deferral state so a recycled slot starts clean.
+            effectsDeferred = false
+            deferredEffectLoader = null
         }
     }
 
@@ -773,6 +1001,12 @@ class MuzeiBlurRenderer(
 
         blurRelatedToArtDetailMode = artDetailMode
         this.isBlurred = isBlurred
+        // If going blurred and effect baking was deferred (because we were sharp
+        // while the user browsed / framed in art detail), bake now — before the
+        // blur animation starts — so the effect frames are ready as they fade in.
+        if (isBlurred) {
+            currentGLPictureSet.bakeDeferredEffects()
+        }
         blurAnimator.start(endValue = if (isBlurred) blurKeyframes else 0) {
             if (isBlurred && artDetailMode) {
                 System.gc()

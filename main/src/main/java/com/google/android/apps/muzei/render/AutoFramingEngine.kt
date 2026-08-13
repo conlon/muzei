@@ -20,6 +20,7 @@ import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.RectF
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
@@ -38,20 +39,152 @@ object AutoFramingEngine {
     private const val DECODE_SIZE = 512
     private const val PADDING_FACTOR = 0.15f
 
+    /**
+     * Detects faces in the artwork at [artworkUri] and returns their bounding boxes
+     * as normalised [RectF] values (coordinates in 0..1 relative to image size).
+     * Returns an empty list when no faces are detected or detection fails.
+     * Intended for use with GLITCH2 filter to bias displacement chunks toward faces.
+     */
+    suspend fun detectFaceRegions(
+            contentResolver: ContentResolver,
+            artworkUri: Uri
+    ): List<RectF> = withContext(Dispatchers.IO) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "AFE detectFaceRegions start ${artworkUri.lastPathSegment}")
+        try {
+            val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
+                    .decode(DECODE_SIZE) ?: return@withContext emptyList()
+            Log.d("NextTiming", "AFE detectFaceRegions decode +${SystemClock.elapsedRealtime() - t0}ms")
+            val imageWidth = bitmap.width.toFloat()
+            val imageHeight = bitmap.height.toFloat()
+            if (imageWidth == 0f || imageHeight == 0f) {
+                bitmap.recycle()
+                return@withContext emptyList()
+            }
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val faceOptions = FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                    .build()
+            val faceDetector = FaceDetection.getClient(faceOptions)
+            val faces = try {
+                faceDetector.process(inputImage).await()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            Log.d("NextTiming", "AFE detectFaceRegions face-await +${SystemClock.elapsedRealtime() - t0}ms (${faces.size} faces)")
+            faceDetector.close()
+            bitmap.recycle()
+            faces.map { face ->
+                val b = face.boundingBox
+                RectF(b.left / imageWidth, b.top / imageHeight,
+                        b.right / imageWidth, b.bottom / imageHeight)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Face detection failed", e)
+            emptyList()
+        }
+    }
+
     suspend fun computeFraming(
             contentResolver: ContentResolver,
             artworkUri: Uri,
             screenAspectRatio: Float
     ): RectF? = withContext(Dispatchers.IO) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "AFE computeFraming start ${artworkUri.lastPathSegment}")
         try {
             val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
                     .decode(DECODE_SIZE) ?: return@withContext null
+            Log.d("NextTiming", "AFE computeFraming decode +${SystemClock.elapsedRealtime() - t0}ms")
             val result = detectSubjects(bitmap, screenAspectRatio)
             bitmap.recycle()
+            Log.d("NextTiming", "AFE computeFraming done +${SystemClock.elapsedRealtime() - t0}ms")
             result
         } catch (e: Exception) {
             Log.w(TAG, "Auto-framing failed", e)
             null
+        }
+    }
+
+    /**
+     * Combined single-decode path for when both auto-framing and GLITCH2 face-biasing are
+     * needed for the same image. Decodes once, runs the face detector once, and returns both
+     * the viewport and the face regions so callers avoid a redundant decode + detection pass.
+     *
+     * @return A pair of (viewport RectF or null, face regions list — may be empty).
+     */
+    suspend fun computeFramingAndFaceRegions(
+            contentResolver: ContentResolver,
+            artworkUri: Uri,
+            screenAspectRatio: Float
+    ): Pair<RectF?, List<RectF>> = withContext(Dispatchers.IO) {
+        val t0 = SystemClock.elapsedRealtime()
+        Log.d("NextTiming", "AFE computeFramingAndFaceRegions start ${artworkUri.lastPathSegment}")
+        try {
+            val bitmap = ContentUriImageLoader(contentResolver, artworkUri)
+                    .decode(DECODE_SIZE) ?: return@withContext Pair(null, emptyList())
+            Log.d("NextTiming", "AFE framing+face decode +${SystemClock.elapsedRealtime() - t0}ms")
+            val imageWidth = bitmap.width.toFloat()
+            val imageHeight = bitmap.height.toFloat()
+            if (imageWidth == 0f || imageHeight == 0f) {
+                bitmap.recycle()
+                return@withContext Pair(null, emptyList())
+            }
+            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            // Run face detection once
+            val faceOptions = FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                    .build()
+            val faceDetector = FaceDetection.getClient(faceOptions)
+            val faces = try {
+                faceDetector.process(inputImage).await()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            Log.d("NextTiming", "AFE framing+face face-await +${SystemClock.elapsedRealtime() - t0}ms (${faces.size} faces)")
+            faceDetector.close()
+            val faceBounds = faces.map { face ->
+                val b = face.boundingBox
+                RectF(b.left / imageWidth, b.top / imageHeight,
+                        b.right / imageWidth, b.bottom / imageHeight)
+            }
+            // Run object detection for auto-framing (heavier pass)
+            val objectOptions = ObjectDetectorOptions.Builder()
+                    .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
+                    .enableMultipleObjects()
+                    .enableClassification()
+                    .build()
+            val objectDetector = ObjectDetection.getClient(objectOptions)
+            val objects = try {
+                objectDetector.process(inputImage).await()
+            } catch (_: Exception) {
+                emptyList()
+            }
+            Log.d("NextTiming", "AFE framing+face object-await +${SystemClock.elapsedRealtime() - t0}ms (${objects.size} objects)")
+            objectDetector.close()
+            val objectBounds = objects.map { obj ->
+                val b = obj.boundingBox
+                RectF(b.left / imageWidth, b.top / imageHeight,
+                        b.right / imageWidth, b.bottom / imageHeight)
+            }
+            bitmap.recycle()
+            val allBounds = faceBounds + objectBounds
+            val viewport = if (allBounds.isEmpty()) {
+                null
+            } else {
+                val subjectUnion = RectF(
+                        allBounds.minOf { it.left }, allBounds.minOf { it.top },
+                        allBounds.maxOf { it.right }, allBounds.maxOf { it.bottom })
+                val faceUnion = if (faceBounds.isNotEmpty()) {
+                    RectF(faceBounds.minOf { it.left }, faceBounds.minOf { it.top },
+                            faceBounds.maxOf { it.right }, faceBounds.maxOf { it.bottom })
+                } else null
+                fitViewport(subjectUnion, faceUnion, screenAspectRatio, imageWidth / imageHeight)
+            }
+            Pair(viewport, faceBounds)
+        } catch (e: Exception) {
+            Log.w(TAG, "Combined framing+face detection failed", e)
+            Pair(null, emptyList())
         }
     }
 

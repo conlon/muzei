@@ -20,6 +20,7 @@ import android.net.Uri
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -39,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -51,6 +55,8 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -70,10 +76,13 @@ fun GalleryChosenPhotoItem(
     modifier: Modifier = Modifier,
     checked: Boolean = false,
     touchLocation: Offset? = null,
+    onToggleEnabled: () -> Unit = {},
     imageProvider: (chosenPhoto: ChosenPhoto, maxImages: Int) -> List<Uri>,
 ) {
     Box(
-        modifier = modifier.aspectRatio(1f)
+        modifier = modifier
+            .aspectRatio(1f)
+            .alpha(if (chosenPhoto.enabled) 1f else 0.4f)
     ) {
         val images = if (chosenPhoto.isTreeUri) {
             imageProvider(chosenPhoto, 4)
@@ -150,6 +159,22 @@ fun GalleryChosenPhotoItem(
                 colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface)
             )
         }
+        // Visibility toggle: tapping this icon enables/disables the source without selecting it
+        Image(
+            if (chosenPhoto.enabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+            contentDescription = if (chosenPhoto.enabled) "Disable source" else "Enable source",
+            modifier = Modifier
+                .padding(6.dp)
+                .size(24.dp)
+                .align(Alignment.TopStart)
+                .background(
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                    shape = CircleShape
+                )
+                .padding(4.dp)
+                .clickable(role = Role.Switch, onClick = onToggleEnabled),
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface)
+        )
         val revealProgress = remember { Animatable(if (checked) 1f else 0f) }
         val revealPath = remember { Path() }
         LaunchedEffect(checked, touchLocation) {

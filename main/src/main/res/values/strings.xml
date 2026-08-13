@@ -31,13 +31,19 @@
     <string name="settings_effect_mode_blur">Blur</string>
     <string name="settings_effect_mode_mosaic">Mosaic</string>
     <string name="settings_mosaic_shape_square">Square</string>
-    <string name="settings_mosaic_shape_triangle">Triangle</string>
+    <string name="settings_mosaic_shape_equilateral">Equilateral</string>
+    <string name="settings_mosaic_shape_irregular">Irregular</string>
     <string name="settings_mosaic_shape_hexagon">Hexagon</string>
-    <string name="settings_mosaic_shape_random">Random</string>
-    <string name="settings_mosaic_shape_mixed1">Mixed 1</string>
-    <string name="settings_mosaic_shape_mixed2">Circles</string>
-    <string name="settings_mosaic_shape_mixed3">Mixed 3</string>
-    <string name="settings_mosaic_shape_mixed4">Mixed 4</string>
+    <string name="settings_mosaic_shape_circle">Circle</string>
+    <string name="settings_mosaic_filter_none">None</string>
+    <string name="settings_mosaic_filter_raindrop">Raindrop</string>
+    <string name="settings_mosaic_filter_glitch1">Glitch 1</string>
+    <string name="settings_mosaic_filter_glitch2">Glitch 2</string>
+    <string name="settings_mosaic_filter_recursive">Recursive</string>
+    <string name="settings_glitch_h_displacement_title">H. Displacement</string>
+    <string name="settings_glitch_v_displacement_title">V. Displacement</string>
+    <string name="settings_glitch_channel_split_title">Channel split</string>
+    <string name="settings_glitch_pixel_sort_title">Pixel tears</string>
 
     <string name="action_favorite">Favorite</string>
     <string name="action_unfavorite">Unfavorite</string>

@@ -641,7 +641,11 @@ class GLThread extends Thread {
                                 if (eventsWaiting) {
                                         Runnable r;
                                         while ((r = getEvent()) != null) {
-                                                r.run();
+                                                try {
+                                                        r.run();
+                                                } catch (Throwable t) {
+                                                        Log.e("GLThread", "Uncaught exception in queued GL event", t);
+                                                }
                                                 if (isDone()) {
                                                         return;
                                                 }

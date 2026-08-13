@@ -29,11 +29,16 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.cachedIn
+import com.google.android.apps.muzei.api.provider.ProviderContract
+import com.google.android.apps.muzei.gallery.BuildConfig.GALLERY_ART_AUTHORITY
+import com.google.android.apps.muzei.gallery.ChosenPhoto
 import com.google.android.apps.muzei.gallery.GalleryDatabase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * ViewModel responsible for handling the list of ACTION_GET_CONTENT activities across configuration
@@ -43,6 +48,16 @@ class GallerySettingsViewModel(application: Application) : AndroidViewModel(appl
     internal val chosenPhotos = Pager(PagingConfig(48)) {
         GalleryDatabase.getInstance(application).chosenPhotoDao().chosenPhotosPaged
     }.flow.cachedIn(viewModelScope)
+
+    internal fun toggleEnabled(chosenPhoto: ChosenPhoto) {
+        viewModelScope.launch(Dispatchers.IO) {
+            GalleryDatabase.getInstance(getApplication()).chosenPhotoDao()
+                    .setEnabled(listOf(chosenPhoto.id), !chosenPhoto.enabled)
+            // Notify ArtworkLoadWorker that the available artwork has changed
+            val contentUri = ProviderContract.getContentUri(GALLERY_ART_AUTHORITY)
+            getApplication<Application>().contentResolver.notifyChange(contentUri, null)
+        }
+    }
 
     @SuppressLint("WrongConstant")
     internal val getContentActivityInfoList = callbackFlow {

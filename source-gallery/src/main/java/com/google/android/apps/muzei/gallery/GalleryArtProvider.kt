@@ -18,17 +18,61 @@ package com.google.android.apps.muzei.gallery
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.database.Cursor
+import android.net.Uri
+import android.util.Log
 import androidx.core.net.toUri
 import com.google.android.apps.muzei.api.provider.Artwork
 import com.google.android.apps.muzei.api.provider.MuzeiArtProvider
+import com.google.android.apps.muzei.api.provider.ProviderContract
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
 
 class GalleryArtProvider: MuzeiArtProvider() {
+    override fun query(
+            uri: Uri,
+            projection: Array<String>?,
+            selection: String?,
+            selectionArgs: Array<String>?,
+            sortOrder: String?
+    ): Cursor {
+        val ctx = context
+        // Only filter collection queries; single-item lookups (uri != contentUri) pass through
+        // so the currently-displayed artwork keeps rendering after its folder is disabled.
+        if (ctx == null || uri != contentUri) {
+            return super.query(uri, projection, selection, selectionArgs, sortOrder)
+        }
+        val disabled = GalleryDatabase.getInstance(ctx).chosenPhotoDao().disabledUriStringsBlocking
+        if (disabled.isEmpty()) {
+            return super.query(uri, projection, selection, selectionArgs, sortOrder)
+        }
+        val placeholders = disabled.joinToString(",") { "?" }
+        val folderClause = "${ProviderContract.Artwork.METADATA} NOT IN ($placeholders)"
+        val newSelection = if (selection.isNullOrEmpty()) folderClause else "($selection) AND $folderClause"
+        val newArgs = (selectionArgs ?: emptyArray()) + disabled.toTypedArray()
+        return super.query(uri, projection, newSelection, newArgs, sortOrder)
+    }
+
     override fun onLoadRequested(initial: Boolean) {
         val context = context ?: return
+        if (!initial) {
+            // Throttle recurring per-tap rescan requests. The full SAF tree crawl
+            // contends with the foreground image load, inflating query and prefetch
+            // times to ~8s. Folder contents don't change between rapid taps, so
+            // only re-crawl once the throttle window has elapsed.
+            val lastScan = context.getSharedPreferences(
+                    GalleryScanWorker.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getLong(GalleryScanWorker.KEY_LAST_RESCAN_TIME, 0L)
+            val elapsed = System.currentTimeMillis() - lastScan
+            if (elapsed < GalleryScanWorker.RESCAN_THROTTLE_MS) {
+                Log.d("NextTiming", "onLoadRequested throttled (last rescan ${elapsed}ms ago)")
+                return
+            }
+        }
+        Log.d("NextTiming", "onLoadRequested enqueueRescan (initial=$initial)")
         GalleryScanWorker.enqueueRescan(context)
     }
 
