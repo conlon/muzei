@@ -24,16 +24,21 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import com.google.android.apps.muzei.ArtDetailViewport
 import com.google.android.apps.muzei.api.MuzeiContract
 import com.google.android.apps.muzei.room.MuzeiDatabase
 import com.google.android.apps.muzei.room.contentUri
 import com.google.android.apps.muzei.settings.Prefs
 import com.google.android.apps.muzei.util.collectIn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 class RealRenderController(
         context: Context,
@@ -54,13 +59,26 @@ class RealRenderController(
      */
     private var autoFrameJob: Job? = null
 
+    /**
+     * True once the user has manually panned/zoomed the current image. When set,
+     * [launchAutoFrameJob] will not override their framing even after ML Kit finishes.
+     * Reset to false whenever [currentArtworkUri] changes (new image).
+     */
+    @Volatile private var userTouchedViewport = false
+
     override fun onCreate(owner: LifecycleOwner) {
         super.onCreate(owner)
         reloadCurrentArtwork()
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun onStart(owner: LifecycleOwner) {
         super.onStart(owner)
+        // Track user-initiated viewport adjustments so the async auto-frame job doesn't
+        // snap back an in-progress manual pan after ML Kit finishes (~5-10s).
+        ArtDetailViewport.getChanges().collectIn(owner) { fromUser ->
+            if (fromUser) userTouchedViewport = true
+        }
         val database = MuzeiDatabase.getInstance(context)
         database.artworkDao().getCurrentArtworkFlow().filterNotNull().collectIn(owner) { artwork ->
             val newUri = artwork.contentUri
@@ -85,6 +103,7 @@ class RealRenderController(
             val tFlow = SystemClock.elapsedRealtime()
             Log.d("NextTiming", "RC emission ${artwork.imageUri.lastPathSegment}")
             currentArtworkUri = newUri
+            userTouchedViewport = false  // new image — auto-framing is allowed again
 
             // --- Fast path: DB-only viewport, then show the photo immediately ---
             // No ML Kit on the critical path — the photo appears at the saved framing
@@ -98,9 +117,60 @@ class RealRenderController(
             // Rapid Next taps cancel the stale job; only the settled image runs ML Kit.
             autoFrameJob?.cancel()
             autoFrameJob = owner.lifecycleScope.launch {
+                // ArtDetailViewport.changes has extraBufferCapacity=1: a fromUser=true event
+                // from the previous image can sit in the buffer and arrive after the
+                // userTouchedViewport=false reset, causing a spurious skipped-touched.
+                // yield() gives the changes collector one turn to drain the buffer; the
+                // re-reset that follows clears any stale effect before real tracking begins.
+                yield()
+                userTouchedViewport = false
                 launchAutoFrameJob(newUri, artwork.imageUri)
             }
         }
+
+        // Live-apply manual framing saves and clears. saveFraming/clearFraming write to the
+        // image_metadata table, which does NOT invalidate the artwork flow above, so without
+        // this collector the already-running wallpaper never re-reads a newly saved viewport —
+        // it keeps the original crop and appears to "revert" the moment the user leaves the app.
+        // We watch the current image's metadata row and push changes straight to the GL thread.
+        var trackedUri: Uri? = null
+        var appliedViewport: RectF? = null
+        database.artworkDao().getCurrentArtworkFlow()
+                .filterNotNull()
+                .flatMapLatest { artwork ->
+                    database.imageMetadataDao().getByImageUriFlow(artwork.imageUri)
+                            .map { meta -> artwork to meta }
+                }
+                .collectIn(owner) { (artwork, meta) ->
+                    // Only react to the image on screen; new-image loads are baked above.
+                    if (artwork.contentUri != currentArtworkUri) return@collectIn
+                    val vp = meta?.takeIf { it.hasSavedViewport }?.let {
+                        RectF(it.savedViewportLeft!!, it.savedViewportTop!!,
+                                it.savedViewportRight!!, it.savedViewportBottom!!)
+                    }
+                    // The first emission for an image is just the load-time state the artwork
+                    // flow already handled — record it as the baseline and don't re-apply.
+                    if (trackedUri != artwork.contentUri) {
+                        trackedUri = artwork.contentUri
+                        appliedViewport = vp
+                        return@collectIn
+                    }
+                    if (vp == appliedViewport) return@collectIn  // no change
+                    appliedViewport = vp
+                    renderer.pendingSavedViewport = vp
+                    if (vp != null) {
+                        // Newly saved framing — apply it to the live picture set immediately.
+                        queueEventOnGlThread { renderer.applyAutoFramedViewport(vp) }
+                    } else {
+                        // Framing was cleared — re-bake at the default crop and let auto-framing
+                        // run again so the live wallpaper reverts instead of freezing the crop.
+                        reloadCurrentArtwork()
+                        autoFrameJob?.cancel()
+                        autoFrameJob = owner.lifecycleScope.launch {
+                            launchAutoFrameJob(currentArtworkUri, artwork.imageUri)
+                        }
+                    }
+                }
     }
 
     override fun onStop(owner: LifecycleOwner) {
@@ -142,7 +212,9 @@ class RealRenderController(
         val autoFramingEnabled = Prefs.getSharedPreferences(context)
                 .getBoolean(Prefs.PREF_AUTO_FRAMING, Prefs.DEFAULT_AUTO_FRAMING)
         val screenAspectRatio = renderer.getAspectRatio()
-        val needsAutoFrame = autoFramingEnabled && screenAspectRatio > 0f
+        // Don't override a viewport the user manually saved — saved framing always wins.
+        val hasSavedViewport = savedViewportFor(imageUri) != null
+        val needsAutoFrame = autoFramingEnabled && screenAspectRatio > 0f && !hasSavedViewport
         val needsFaces = renderer.wantsSubjectRegions()
 
         if (!needsAutoFrame && !needsFaces) return
@@ -182,9 +254,21 @@ class RealRenderController(
         }
 
         // Apply the auto-framed viewport on the GL thread (updates GLPictureSet.savedViewport).
-        if (viewport != null) {
+        // Re-check the DB and the user-touched flag in case the user manually adjusted the
+        // framing while ML Kit was running — their choice always wins over auto-framing.
+        // Log the decision so we can diagnose unexpected skips (e.g. face-out-of-frame reports).
+        val applyReason = when {
+            viewport == null -> "viewport-null"
+            currentArtworkUri != capturedContentUri -> "skipped-stale"
+            userTouchedViewport -> "skipped-touched"
+            savedViewportFor(imageUri) != null -> "skipped-saved"
+            else -> "applied"
+        }
+        Log.d("AutoFramingEngine", "autoframe ${imageUri.lastPathSegment} → $applyReason" +
+                (if (viewport != null) " vp=$viewport" else ""))
+        if (applyReason == "applied") {
             queueEventOnGlThread {
-                renderer.applyAutoFramedViewport(viewport)
+                renderer.applyAutoFramedViewport(viewport!!)
             }
         }
     }
