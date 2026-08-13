@@ -25,6 +25,7 @@ import android.provider.BaseColumns
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -68,11 +69,28 @@ class ArtworkLoadWorker(
         private const val TAG = "ArtworkLoad"
         private const val PERIODIC_TAG = "ArtworkLoadPeriodic"
         private const val ARTWORK_LOAD_THROTTLE = 250L // quarter second
+        private const val KEY_TARGET_IMAGE_URI = "target_image_uri"
 
         internal fun enqueueNext(context: Context) {
             val workManager = WorkManager.getInstance(context)
             workManager.enqueueUniqueWork(TAG, ExistingWorkPolicy.REPLACE,
                     OneTimeWorkRequestBuilder<ArtworkLoadWorker>().build())
+        }
+
+        /**
+         * Load one specific image (identified by its `content://<authority>/<id>` [imageUri])
+         * and make it the current artwork. Used by the favorites-boost feature to surface a
+         * chosen favorite even when it is not in the recent-history window. If the image can no
+         * longer be loaded (deleted, invalid, provider error) this falls back to a normal load.
+         */
+        internal fun enqueueFavorite(context: Context, imageUri: Uri) {
+            val workManager = WorkManager.getInstance(context)
+            workManager.enqueueUniqueWork(TAG, ExistingWorkPolicy.REPLACE,
+                    OneTimeWorkRequestBuilder<ArtworkLoadWorker>()
+                            .setInputData(Data.Builder()
+                                    .putString(KEY_TARGET_IMAGE_URI, imageUri.toString())
+                                    .build())
+                            .build())
         }
 
         internal fun enqueuePeriodic(
@@ -107,6 +125,11 @@ class ArtworkLoadWorker(
         // Throttle artwork loads
         delay(ARTWORK_LOAD_THROTTLE)
         Log.d("NextTiming", "Worker post-throttle +${SystemClock.elapsedRealtime() - t0}ms")
+        // If this load targets a specific favorite, load that image directly rather than
+        // running the normal provider-driven selection.
+        inputData.getString(KEY_TARGET_IMAGE_URI)?.let { targetUriString ->
+            return@withContext loadTargetArtwork(Uri.parse(targetUriString))
+        }
         // Now actually load the artwork
         val database = MuzeiDatabase.getInstance(applicationContext)
         val (authority) = database.providerDao()
@@ -288,6 +311,60 @@ class ArtworkLoadWorker(
             }
         }
         Result.retry()
+    }
+
+    /**
+     * Loads the single artwork identified by [targetUri] from its provider and inserts it as
+     * the current artwork. Falls back to a normal [enqueueNext] load if the image can no longer
+     * be retrieved (e.g. it was removed from the source or the provider errors out).
+     */
+    private suspend fun loadTargetArtwork(targetUri: Uri): Result {
+        val database = MuzeiDatabase.getInstance(applicationContext)
+        val authority = targetUri.authority
+        val artworkId = try {
+            ContentUris.parseId(targetUri)
+        } catch (e: NumberFormatException) {
+            -1L
+        }
+        if (authority != null && artworkId >= 0) {
+            val contentUri = ProviderContract.getContentUri(authority)
+            try {
+                ContentProviderClientCompat.getClient(applicationContext, contentUri)?.use { client ->
+                    client.query(
+                            contentUri,
+                            selection = "${BaseColumns._ID} = ?",
+                            selectionArgs = arrayOf(artworkId.toString())
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            checkForValidArtwork(client, contentUri, cursor)?.let { validArtwork ->
+                                validArtwork.providerAuthority = authority
+                                val id = database.artworkDao().insert(validArtwork)
+                                database.imageMetadataDao().ensureRow(
+                                        ImageMetadata(validArtwork.imageUri, authority))
+                                client.call(METHOD_MARK_ARTWORK_LOADED, validArtwork.imageUri.toString())
+                                if (BuildConfig.DEBUG) {
+                                    Log.d(TAG, "Loaded favorite ${validArtwork.imageUri} into id $id")
+                                }
+                                return Result.success()
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                when (e) {
+                    is CancellationException -> throw e
+                    else -> Log.i(TAG, "Provider $authority crashed loading favorite " +
+                            "$targetUri: ${e.message}")
+                }
+            }
+        }
+        // Couldn't load the requested favorite — fall back to a normal advance so that a "Next"
+        // still results in a rotation.
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Favorite $targetUri unavailable; falling back to a normal load")
+        }
+        enqueueNext(applicationContext)
+        return Result.success()
     }
 
     private suspend fun checkForValidArtwork(

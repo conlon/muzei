@@ -313,36 +313,37 @@ class ProviderManager private constructor(private val context: Context)
                 ?.getSharedPreferences("wallpaper_preferences", Context.MODE_PRIVATE)
                 ?: context.getSharedPreferences("wallpaper_preferences", Context.MODE_PRIVATE)
         val favoriteBoost = prefs.getInt("favorite_boost", 0)
-        if (favoriteBoost > 0 && (Math.random() * 100) < favoriteBoost) {
-            GlobalScope.launch {
-                val database = MuzeiDatabase.getInstance(context)
-                // Pull a random favorite from the per-image metadata table so that the choice
-                // persists even when the history row has rolled over.
-                val favoriteMeta = database.imageMetadataDao().getRandomFavorite()
-                if (favoriteMeta != null) {
-                    // If the favored image is already in the history table, re-surface it by
-                    // bumping its date_added. Otherwise let ArtworkLoadWorker pick the next
-                    // image normally — it will still load non-favorited images until that image
-                    // appears again via the provider. (Full favorite-targeted reload is a
-                    // deferred follow-up.)
-                    val existing = database.artworkDao().getCurrentArtwork()
-                    if (existing != null && existing.imageUri == favoriteMeta.imageUri) {
-                        // Already showing it; fall through to a normal advance
-                        ArtworkLoadWorker.enqueueNext(context)
-                        return@launch
-                    }
-                    // Find the most recent history row for this imageUri and bump it
-                    val historyRows = database.artworkDao().getArtwork()
-                    val match = historyRows.firstOrNull { it.imageUri == favoriteMeta.imageUri }
-                    if (match != null) {
-                        database.artworkDao().updateDateAdded(match.id, System.currentTimeMillis())
-                        return@launch
-                    }
-                }
-                ArtworkLoadWorker.enqueueNext(context)
-            }
-        } else {
+        // favoriteBoost is the slider value 0..100: the probability (in percent) that this
+        // rotation should be forced to a favorite. At 0 we never force (fully normal); at 100 we
+        // always force (favorites only). Anywhere in between is a weighted coin flip. When the
+        // roll fails — or when there is no favorite to show — we fall back to normal, non-selective
+        // loading, which may still surface a favorite naturally.
+        if (favoriteBoost <= 0 || (Math.random() * 100) >= favoriteBoost) {
             ArtworkLoadWorker.enqueueNext(context)
+            return
+        }
+        GlobalScope.launch {
+            val database = MuzeiDatabase.getInstance(context)
+            // Pick a random favorite other than the one already showing, so "Next" rotates to a
+            // different image. The favorite flag lives in the per-image metadata table, so the
+            // choice persists even after the rolling history log has rolled over.
+            val current = database.artworkDao().getCurrentArtwork()
+            val favoriteMeta = database.imageMetadataDao().getRandomFavorite(current?.imageUri)
+            if (favoriteMeta == null) {
+                // No favorite available (none marked, or the only favorite is already showing) —
+                // behave normally.
+                ArtworkLoadWorker.enqueueNext(context)
+                return@launch
+            }
+            // If the favorite is still in the recent-history log, re-surface it cheaply by bumping
+            // its date_added. Otherwise load it directly from its provider.
+            val match = database.artworkDao().getArtwork()
+                    .firstOrNull { it.imageUri == favoriteMeta.imageUri }
+            if (match != null) {
+                database.artworkDao().updateDateAdded(match.id, System.currentTimeMillis())
+            } else {
+                ArtworkLoadWorker.enqueueFavorite(context, favoriteMeta.imageUri)
+            }
         }
     }
 }

@@ -64,8 +64,12 @@ abstract class ImageMetadataDao {
 
     /**
      * Returns a random favorited image, or null if none exist. Used by the favorites-boost
-     * feature to pick an image to re-show.
+     * feature to pick an image to show. Pass [excludeUri] (typically the current artwork) to
+     * avoid picking the image that is already showing, so that "Next" always rotates to a
+     * different favorite; pass null to consider every favorite.
      */
-    @Query("SELECT * FROM image_metadata WHERE is_favorite = 1 ORDER BY RANDOM() LIMIT 1")
-    abstract suspend fun getRandomFavorite(): ImageMetadata?
+    @Query("""SELECT * FROM image_metadata WHERE is_favorite = 1
+        AND (:excludeUri IS NULL OR imageUri != :excludeUri)
+        ORDER BY RANDOM() LIMIT 1""")
+    abstract suspend fun getRandomFavorite(excludeUri: Uri?): ImageMetadata?
 }
