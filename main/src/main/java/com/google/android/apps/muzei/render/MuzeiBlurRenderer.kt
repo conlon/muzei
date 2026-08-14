@@ -85,7 +85,7 @@ class MuzeiBlurRenderer(
         const val DEFAULT_MOSAIC_OPACITY = 500 // max 500; 500 = full mosaic (preserves existing look)
         const val DEFAULT_GLITCH_H_DISPLACEMENT = 250  // max 500
         const val DEFAULT_GLITCH_V_DISPLACEMENT = 250  // max 500
-        const val DEFAULT_GLITCH_CHANNEL_SPLIT = 250 // max 500
+        const val DEFAULT_GLITCH_CHANNEL_SPLIT = 250 // max 2000 (spread ceiling ~128px)
         const val DEFAULT_GLITCH_PIXEL_SORT = 250    // max 500
         const val DEFAULT_EFFECT_MODE = Prefs.EFFECT_MODE_BLUR
         const val DEFAULT_MOSAIC_SHAPE = Prefs.MOSAIC_SHAPE_SQUARE
@@ -269,7 +269,7 @@ class MuzeiBlurRenderer(
         glitchChannelSplitPreferenceName = newGlitchChannelSplitPreferenceName
         glitchChannelSplit = Prefs.getSharedPreferences(context)
                 .getInt(glitchChannelSplitPreferenceName, DEFAULT_GLITCH_CHANNEL_SPLIT)
-                .coerceIn(0, 500)
+                .coerceIn(0, 2000)
     }
 
     fun recomputeGlitchPixelSort(

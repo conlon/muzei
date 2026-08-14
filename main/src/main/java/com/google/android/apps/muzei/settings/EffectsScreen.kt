@@ -544,7 +544,9 @@ private fun EffectsGrid(
                         value = glitchChannelSplit.toFloat(),
                         onValueChange = { onGlitchChannelSplitChange(it.toInt()) },
                         modifier = Modifier.padding(vertical = 2.dp),
-                        valueRange = 0f..500f,
+                        // 4x the other glitch sliders' range so the channel-split spread can reach
+                        // ~128px (tc up to 4.0) for heavier chromatic-aberration distortion.
+                        valueRange = 0f..2000f,
                         onValueChangeFinished = onGlitchChannelSplitChangeFinished,
                         colors = sliderColors,
                     )
