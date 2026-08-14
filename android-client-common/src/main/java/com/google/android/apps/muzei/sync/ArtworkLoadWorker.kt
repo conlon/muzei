@@ -28,6 +28,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ListenableWorker.Result
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
@@ -56,6 +57,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
+private const val TAG = "ArtworkLoad"
+
 /**
  * Worker responsible for loading artwork from a [MuzeiArtProvider] and inserting it into
  * the [MuzeiDatabase].
@@ -66,7 +69,6 @@ class ArtworkLoadWorker(
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
-        private const val TAG = "ArtworkLoad"
         private const val PERIODIC_TAG = "ArtworkLoadPeriodic"
         private const val ARTWORK_LOAD_THROTTLE = 250L // quarter second
         private const val KEY_TARGET_IMAGE_URI = "target_image_uri"
@@ -119,287 +121,300 @@ class ArtworkLoadWorker(
         }
     }
 
-    override suspend fun doWork() = withContext(syncSingleThreadContext) {
-        val t0 = SystemClock.elapsedRealtime()
+    override suspend fun doWork(): Result {
         Log.d("NextTiming", "Worker entry")
-        // Throttle artwork loads
+        // Throttle background/periodic loads. Foreground "Next" taps call loadArtworkNow()
+        // directly (see ProviderManager.nextArtwork) to skip WorkManager scheduling latency.
         delay(ARTWORK_LOAD_THROTTLE)
-        Log.d("NextTiming", "Worker post-throttle +${SystemClock.elapsedRealtime() - t0}ms")
-        // If this load targets a specific favorite, load that image directly rather than
-        // running the normal provider-driven selection.
-        inputData.getString(KEY_TARGET_IMAGE_URI)?.let { targetUriString ->
-            return@withContext loadTargetArtwork(Uri.parse(targetUriString))
-        }
-        // Now actually load the artwork
-        val database = MuzeiDatabase.getInstance(applicationContext)
-        val (authority) = database.providerDao()
-                .getCurrentProvider() ?: return@withContext Result.failure()
-        if (BuildConfig.DEBUG) {
-            Log.d(TAG, "Artwork Load for $authority")
-        }
-        val loadOrdering = ProviderManager.getInstance(applicationContext).loadOrdering
-        val contentUri = ProviderContract.getContentUri(authority)
-        try {
-            ContentProviderClientCompat.getClient(applicationContext, contentUri)?.use { client ->
-                Log.d("NextTiming", "Worker getLoadInfo +${SystemClock.elapsedRealtime() - t0}ms")
-                val result = client.call(METHOD_GET_LOAD_INFO)
-                        ?: return@withContext Result.failure()
-                Log.d("NextTiming", "Worker getLoadInfo done +${SystemClock.elapsedRealtime() - t0}ms")
-                val maxLoadedArtworkId = result.getLong(KEY_MAX_LOADED_ARTWORK_ID, 0L)
-                val recentArtworkIds = result.getRecentIds(KEY_RECENT_ARTWORK_IDS)
-                val startingArtworkId = when (loadOrdering) {
-                    // IN_ORDER means we always start with the last artwork we loaded
-                    ProviderManager.LoadOrdering.IN_ORDER ->recentArtworkIds.lastOrNull() ?: maxLoadedArtworkId
-                    // NEW_IN_ORDER means that we load new artwork starting with the max loaded
-                    ProviderManager.LoadOrdering.NEW_IN_ORDER -> maxLoadedArtworkId
-                    // RANDOM means we never care about new artwork
-                    ProviderManager.LoadOrdering.RANDOM -> Int.MAX_VALUE
-                }
-                Log.d("NextTiming", "Worker query-new +${SystemClock.elapsedRealtime() - t0}ms")
+        val target = inputData.getString(KEY_TARGET_IMAGE_URI)?.let(Uri::parse)
+        return loadArtworkNow(applicationContext, target)
+    }
+}
+
+/**
+ * Loads the next artwork in-process on the shared [syncSingleThreadContext]. Runs both from
+ * [ArtworkLoadWorker] (background/periodic loads) and directly from ProviderManager (foreground
+ * "Next" taps); the latter path avoids the multi-second WorkManager/JobScheduler scheduling
+ * latency that otherwise locks the UI on every tap.
+ *
+ * If [targetImageUri] is non-null it is tried first (favorites boost); if that image can no
+ * longer be loaded, this falls through to the normal provider-driven selection below.
+ */
+internal suspend fun loadArtworkNow(
+        context: Context,
+        targetImageUri: Uri?
+): Result = withContext(syncSingleThreadContext) {
+    val t0 = SystemClock.elapsedRealtime()
+    if (targetImageUri != null && loadTargetArtwork(context, targetImageUri)) {
+        return@withContext Result.success()
+    }
+    // Now actually load the artwork
+    val database = MuzeiDatabase.getInstance(context)
+    val (authority) = database.providerDao()
+            .getCurrentProvider() ?: return@withContext Result.failure()
+    if (BuildConfig.DEBUG) {
+        Log.d(TAG, "Artwork Load for $authority")
+    }
+    val loadOrdering = ProviderManager.getInstance(context).loadOrdering
+    val contentUri = ProviderContract.getContentUri(authority)
+    try {
+        ContentProviderClientCompat.getClient(context, contentUri)?.use { client ->
+            Log.d("NextTiming", "Worker getLoadInfo +${SystemClock.elapsedRealtime() - t0}ms")
+            val result = client.call(METHOD_GET_LOAD_INFO)
+                    ?: return@withContext Result.failure()
+            Log.d("NextTiming", "Worker getLoadInfo done +${SystemClock.elapsedRealtime() - t0}ms")
+            val maxLoadedArtworkId = result.getLong(KEY_MAX_LOADED_ARTWORK_ID, 0L)
+            val recentArtworkIds = result.getRecentIds(KEY_RECENT_ARTWORK_IDS)
+            val startingArtworkId = when (loadOrdering) {
+                // IN_ORDER means we always start with the last artwork we loaded
+                ProviderManager.LoadOrdering.IN_ORDER ->recentArtworkIds.lastOrNull() ?: maxLoadedArtworkId
+                // NEW_IN_ORDER means that we load new artwork starting with the max loaded
+                ProviderManager.LoadOrdering.NEW_IN_ORDER -> maxLoadedArtworkId
+                // RANDOM means we never care about new artwork
+                ProviderManager.LoadOrdering.RANDOM -> Int.MAX_VALUE
+            }
+            Log.d("NextTiming", "Worker query-new +${SystemClock.elapsedRealtime() - t0}ms")
+            client.query(
+                    contentUri,
+                    selection = "_id > ?",
+                    selectionArgs = arrayOf(startingArtworkId.toString()),
+                    sortOrder = ProviderContract.Artwork._ID
+            )?.use { newArtwork ->
+                Log.d("NextTiming", "Worker query-new done (${newArtwork.count}) +${SystemClock.elapsedRealtime() - t0}ms")
+                Log.d("NextTiming", "Worker query-all +${SystemClock.elapsedRealtime() - t0}ms")
                 client.query(
-                        contentUri,
-                        selection = "_id > ?",
-                        selectionArgs = arrayOf(startingArtworkId.toString()),
-                        sortOrder = ProviderContract.Artwork._ID
-                )?.use { newArtwork ->
-                    Log.d("NextTiming", "Worker query-new done (${newArtwork.count}) +${SystemClock.elapsedRealtime() - t0}ms")
-                    Log.d("NextTiming", "Worker query-all +${SystemClock.elapsedRealtime() - t0}ms")
-                    client.query(
-                        contentUri,
-                        sortOrder = ProviderContract.Artwork._ID
-                    )?.use { allArtwork ->
-                        Log.d("NextTiming", "Worker query-all done (${allArtwork.count}) +${SystemClock.elapsedRealtime() - t0}ms")
-                        // First prioritize new artwork
-                        while (newArtwork.moveToNext()) {
-                            Log.d("NextTiming", "Worker checkValid ${newArtwork.position}/${newArtwork.count} +${SystemClock.elapsedRealtime() - t0}ms")
-                            val validArtwork = checkForValidArtwork(client, contentUri, newArtwork)
-                            Log.d("NextTiming", "Worker checkValid done ${if (validArtwork != null) "OK" else "skip"} +${SystemClock.elapsedRealtime() - t0}ms")
-                            if (validArtwork != null) {
-                                validArtwork.providerAuthority = authority
-                                val artworkId = database.artworkDao().insert(validArtwork)
-                                database.imageMetadataDao().ensureRow(
-                                        ImageMetadata(validArtwork.imageUri, authority))
-                                Log.d("NextTiming", "Worker inserted artwork ${validArtwork.imageUri.lastPathSegment} +${SystemClock.elapsedRealtime() - t0}ms")
+                    contentUri,
+                    sortOrder = ProviderContract.Artwork._ID
+                )?.use { allArtwork ->
+                    Log.d("NextTiming", "Worker query-all done (${allArtwork.count}) +${SystemClock.elapsedRealtime() - t0}ms")
+                    // First prioritize new artwork
+                    while (newArtwork.moveToNext()) {
+                        Log.d("NextTiming", "Worker checkValid ${newArtwork.position}/${newArtwork.count} +${SystemClock.elapsedRealtime() - t0}ms")
+                        val validArtwork = checkForValidArtwork(client, contentUri, newArtwork)
+                        Log.d("NextTiming", "Worker checkValid done ${if (validArtwork != null) "OK" else "skip"} +${SystemClock.elapsedRealtime() - t0}ms")
+                        if (validArtwork != null) {
+                            validArtwork.providerAuthority = authority
+                            val artworkId = database.artworkDao().insert(validArtwork)
+                            database.imageMetadataDao().ensureRow(
+                                    ImageMetadata(validArtwork.imageUri, authority))
+                            Log.d("NextTiming", "Worker inserted artwork ${validArtwork.imageUri.lastPathSegment} +${SystemClock.elapsedRealtime() - t0}ms")
+                            if (BuildConfig.DEBUG) {
+                                Log.d(TAG, "Loaded ${validArtwork.imageUri} into id $artworkId")
+                            }
+                            client.call(METHOD_MARK_ARTWORK_LOADED, validArtwork.imageUri.toString())
+                            // If we just loaded the last new artwork, we should request that they load another
+                            // in preparation for the next load
+                            if (!newArtwork.moveToNext()) {
                                 if (BuildConfig.DEBUG) {
-                                    Log.d(TAG, "Loaded ${validArtwork.imageUri} into id $artworkId")
+                                    Log.d(TAG, "Out of new artwork, requesting load from $authority")
                                 }
-                                client.call(METHOD_MARK_ARTWORK_LOADED, validArtwork.imageUri.toString())
-                                // If we just loaded the last new artwork, we should request that they load another
-                                // in preparation for the next load
-                                if (!newArtwork.moveToNext()) {
-                                    if (BuildConfig.DEBUG) {
-                                        Log.d(TAG, "Out of new artwork, requesting load from $authority")
-                                    }
-                                    client.call(METHOD_REQUEST_LOAD)
+                                client.call(METHOD_REQUEST_LOAD)
+                            }
+                            return@withContext Result.success()
+                        }
+                    }
+                    if (BuildConfig.DEBUG) {
+                        if (loadOrdering == ProviderManager.LoadOrdering.RANDOM) {
+                            Log.d(TAG, "Loading in random order, requesting load from $authority")
+                        } else {
+                            Log.d(TAG, "Could not find any new artwork, requesting load from $authority")
+                        }
+                    }
+                    // No new artwork, request that they load another in preparation for the next load
+                    Log.d("NextTiming", "Worker requestLoad +${SystemClock.elapsedRealtime() - t0}ms")
+                    client.call(METHOD_REQUEST_LOAD)
+                    Log.d("NextTiming", "Worker requestLoad done +${SystemClock.elapsedRealtime() - t0}ms")
+                    // Is there any artwork at all?
+                    if (allArtwork.count == 0) {
+                        Log.w(TAG, "Unable to find any artwork for $authority")
+                        return@withContext Result.failure()
+                    }
+                    // Okay so there's at least some artwork.
+                    // Is it just the one artwork we're already showing?
+                    val currentArtwork = database.artworkDao().getCurrentArtwork()
+                    if (allArtwork.count == 1 && allArtwork.moveToFirst()) {
+                        val artworkId = allArtwork.getLong(BaseColumns._ID)
+                        val artworkUri = ContentUris.withAppendedId(contentUri, artworkId)
+                        if (artworkUri == currentArtwork?.imageUri) {
+                            if (BuildConfig.DEBUG) {
+                                Log.i(TAG, "Provider $authority only has one artwork")
+                            }
+                            return@withContext Result.failure()
+                        }
+                    }
+                    // We've loaded every artwork IN_ORDER, so we need to loop back around
+                    // to the first artwork again to continue loading in order
+                    if (loadOrdering == ProviderManager.LoadOrdering.IN_ORDER) {
+                        if (allArtwork.moveToPosition(0)) {
+                            checkForValidArtwork(client, contentUri, allArtwork)?.apply {
+                                providerAuthority = authority
+                                val artworkId = database.artworkDao().insert(this)
+                                database.imageMetadataDao().ensureRow(
+                                        ImageMetadata(imageUri, authority))
+                                if (BuildConfig.DEBUG) {
+                                    Log.d(TAG, "Loaded $imageUri into id $artworkId")
                                 }
+                                client.call(METHOD_MARK_ARTWORK_LOADED, imageUri.toString())
                                 return@withContext Result.success()
                             }
                         }
-                        if (BuildConfig.DEBUG) {
-                            if (loadOrdering == ProviderManager.LoadOrdering.RANDOM) {
-                                Log.d(TAG, "Loading in random order, requesting load from $authority")
-                            } else {
-                                Log.d(TAG, "Could not find any new artwork, requesting load from $authority")
-                            }
-                        }
-                        // No new artwork, request that they load another in preparation for the next load
-                        Log.d("NextTiming", "Worker requestLoad +${SystemClock.elapsedRealtime() - t0}ms")
-                        client.call(METHOD_REQUEST_LOAD)
-                        Log.d("NextTiming", "Worker requestLoad done +${SystemClock.elapsedRealtime() - t0}ms")
-                        // Is there any artwork at all?
-                        if (allArtwork.count == 0) {
-                            Log.w(TAG, "Unable to find any artwork for $authority")
-                            return@withContext Result.failure()
-                        }
-                        // Okay so there's at least some artwork.
-                        // Is it just the one artwork we're already showing?
-                        val currentArtwork = database.artworkDao().getCurrentArtwork()
-                        if (allArtwork.count == 1 && allArtwork.moveToFirst()) {
+                    }
+                    // At this point, we know there must be some artwork that isn't the current
+                    // artwork. We want to avoid showing artwork we've recently loaded, so
+                    // we'll generate two sequences - the first being made up of
+                    // non recent artwork, the second being made up of only recent artwork
+                    // Build a lambda that checks whether the given position
+                    // represents the current artwork
+                    val isCurrentArtwork: (position: Int) -> Boolean = { position ->
+                        if (allArtwork.moveToPosition(position)) {
                             val artworkId = allArtwork.getLong(BaseColumns._ID)
                             val artworkUri = ContentUris.withAppendedId(contentUri, artworkId)
-                            if (artworkUri == currentArtwork?.imageUri) {
-                                if (BuildConfig.DEBUG) {
-                                    Log.i(TAG, "Provider $authority only has one artwork")
-                                }
-                                return@withContext Result.failure()
-                            }
-                        }
-                        // We've loaded every artwork IN_ORDER, so we need to loop back around
-                        // to the first artwork again to continue loading in order
-                        if (loadOrdering == ProviderManager.LoadOrdering.IN_ORDER) {
-                            if (allArtwork.moveToPosition(0)) {
-                                checkForValidArtwork(client, contentUri, allArtwork)?.apply {
-                                    providerAuthority = authority
-                                    val artworkId = database.artworkDao().insert(this)
-                                    database.imageMetadataDao().ensureRow(
-                                            ImageMetadata(imageUri, authority))
-                                    if (BuildConfig.DEBUG) {
-                                        Log.d(TAG, "Loaded $imageUri into id $artworkId")
-                                    }
-                                    client.call(METHOD_MARK_ARTWORK_LOADED, imageUri.toString())
-                                    return@withContext Result.success()
-                                }
-                            }
-                        }
-                        // At this point, we know there must be some artwork that isn't the current
-                        // artwork. We want to avoid showing artwork we've recently loaded, so
-                        // we'll generate two sequences - the first being made up of
-                        // non recent artwork, the second being made up of only recent artwork
-                        // Build a lambda that checks whether the given position
-                        // represents the current artwork
-                        val isCurrentArtwork: (position: Int) -> Boolean = { position ->
-                            if (allArtwork.moveToPosition(position)) {
-                                val artworkId = allArtwork.getLong(BaseColumns._ID)
-                                val artworkUri = ContentUris.withAppendedId(contentUri, artworkId)
-                                artworkUri == currentArtwork?.imageUri
-                            } else {
-                                false
-                            }
-                        }
-                        // Build a lambda that checks whether the given position
-                        // represents an artwork in the recentArtworkIds
-                        val isRecentArtwork: (position: Int) -> Boolean = { position ->
-                            if (allArtwork.moveToPosition(position)) {
-                                val artworkId = allArtwork.getLong(BaseColumns._ID)
-                                recentArtworkIds.contains(artworkId)
-                            } else {
-                                false
-                            }
-                        }
-                        // Now generate a random sequence for non recent artwork
-                        val nonRecentArtworkSequence = generateSequence {
-                            Random.nextInt(allArtwork.count)
-                        }.distinct().take(allArtwork.count)
-                            .filterNot(isCurrentArtwork)
-                            .filterNot(isRecentArtwork)
-                        // Now generate another sequence for recent artwork
-                        val recentArtworkSequence = generateSequence {
-                            Random.nextInt(allArtwork.count)
-                        }.distinct().take(allArtwork.count)
-                            .filterNot(isCurrentArtwork)
-                            .filter(isRecentArtwork)
-                        // And build the final sequence that iterates first through
-                        // non recent artwork, then recent artwork
-                        val randomSequence = nonRecentArtworkSequence + recentArtworkSequence
-                        val iterator = randomSequence.iterator()
-                        while (iterator.hasNext()) {
-                            val position = iterator.next()
-                            if (allArtwork.moveToPosition(position)) {
-                                checkForValidArtwork(client, contentUri, allArtwork)?.apply {
-                                    providerAuthority = authority
-                                    val artworkId = database.artworkDao().insert(this)
-                                    database.imageMetadataDao().ensureRow(
-                                            ImageMetadata(imageUri, authority))
-                                    if (BuildConfig.DEBUG) {
-                                        Log.d(TAG, "Loaded $imageUri into id $artworkId")
-                                    }
-                                    client.call(METHOD_MARK_ARTWORK_LOADED, imageUri.toString())
-                                    return@withContext Result.success()
-                                }
-                            }
-                        }
-                        if (BuildConfig.DEBUG) {
-                            Log.i(TAG, "Unable to find any other valid artwork for $authority")
+                            artworkUri == currentArtwork?.imageUri
+                        } else {
+                            false
                         }
                     }
-                }
-            }
-        } catch (e: Exception) {
-            when (e) {
-                is CancellationException -> throw e
-                else -> Log.i(TAG, "Provider $authority crashed while retrieving artwork: ${e.message}")
-            }
-        }
-        Result.retry()
-    }
-
-    /**
-     * Loads the single artwork identified by [targetUri] from its provider and inserts it as
-     * the current artwork. Falls back to a normal [enqueueNext] load if the image can no longer
-     * be retrieved (e.g. it was removed from the source or the provider errors out).
-     */
-    private suspend fun loadTargetArtwork(targetUri: Uri): Result {
-        val database = MuzeiDatabase.getInstance(applicationContext)
-        val authority = targetUri.authority
-        val artworkId = try {
-            ContentUris.parseId(targetUri)
-        } catch (e: NumberFormatException) {
-            -1L
-        }
-        if (authority != null && artworkId >= 0) {
-            val contentUri = ProviderContract.getContentUri(authority)
-            try {
-                ContentProviderClientCompat.getClient(applicationContext, contentUri)?.use { client ->
-                    client.query(
-                            contentUri,
-                            selection = "${BaseColumns._ID} = ?",
-                            selectionArgs = arrayOf(artworkId.toString())
-                    )?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            checkForValidArtwork(client, contentUri, cursor)?.let { validArtwork ->
-                                validArtwork.providerAuthority = authority
-                                val id = database.artworkDao().insert(validArtwork)
+                    // Build a lambda that checks whether the given position
+                    // represents an artwork in the recentArtworkIds
+                    val isRecentArtwork: (position: Int) -> Boolean = { position ->
+                        if (allArtwork.moveToPosition(position)) {
+                            val artworkId = allArtwork.getLong(BaseColumns._ID)
+                            recentArtworkIds.contains(artworkId)
+                        } else {
+                            false
+                        }
+                    }
+                    // Now generate a random sequence for non recent artwork
+                    val nonRecentArtworkSequence = generateSequence {
+                        Random.nextInt(allArtwork.count)
+                    }.distinct().take(allArtwork.count)
+                        .filterNot(isCurrentArtwork)
+                        .filterNot(isRecentArtwork)
+                    // Now generate another sequence for recent artwork
+                    val recentArtworkSequence = generateSequence {
+                        Random.nextInt(allArtwork.count)
+                    }.distinct().take(allArtwork.count)
+                        .filterNot(isCurrentArtwork)
+                        .filter(isRecentArtwork)
+                    // And build the final sequence that iterates first through
+                    // non recent artwork, then recent artwork
+                    val randomSequence = nonRecentArtworkSequence + recentArtworkSequence
+                    val iterator = randomSequence.iterator()
+                    while (iterator.hasNext()) {
+                        val position = iterator.next()
+                        if (allArtwork.moveToPosition(position)) {
+                            checkForValidArtwork(client, contentUri, allArtwork)?.apply {
+                                providerAuthority = authority
+                                val artworkId = database.artworkDao().insert(this)
                                 database.imageMetadataDao().ensureRow(
-                                        ImageMetadata(validArtwork.imageUri, authority))
-                                client.call(METHOD_MARK_ARTWORK_LOADED, validArtwork.imageUri.toString())
+                                        ImageMetadata(imageUri, authority))
                                 if (BuildConfig.DEBUG) {
-                                    Log.d(TAG, "Loaded favorite ${validArtwork.imageUri} into id $id")
+                                    Log.d(TAG, "Loaded $imageUri into id $artworkId")
                                 }
-                                return Result.success()
+                                client.call(METHOD_MARK_ARTWORK_LOADED, imageUri.toString())
+                                return@withContext Result.success()
                             }
                         }
                     }
-                }
-            } catch (e: Exception) {
-                when (e) {
-                    is CancellationException -> throw e
-                    else -> Log.i(TAG, "Provider $authority crashed loading favorite " +
-                            "$targetUri: ${e.message}")
-                }
-            }
-        }
-        // Couldn't load the requested favorite — fall back to a normal advance so that a "Next"
-        // still results in a rotation.
-        if (BuildConfig.DEBUG) {
-            Log.d(TAG, "Favorite $targetUri unavailable; falling back to a normal load")
-        }
-        enqueueNext(applicationContext)
-        return Result.success()
-    }
-
-    private suspend fun checkForValidArtwork(
-            client: ContentProviderClientCompat,
-            contentUri: Uri,
-            data: Cursor
-    ): Artwork? {
-        val providerArtwork = com.google.android.apps.muzei.api.provider.Artwork.fromCursor(data)
-        val artworkUri = ContentUris.withAppendedId(contentUri, providerArtwork.id)
-        try {
-            client.openInputStream(artworkUri)?.use { inputStream ->
-                if (inputStream.isValidImage()) {
-                    return Artwork(artworkUri).apply {
-                        title = providerArtwork.title
-                        byline = providerArtwork.byline
-                        attribution = providerArtwork.attribution
-                    }
-                } else {
                     if (BuildConfig.DEBUG) {
-                        Log.w(TAG, "Artwork $artworkUri is not a valid image")
+                        Log.i(TAG, "Unable to find any other valid artwork for $authority")
                     }
-                    // Tell the client that the artwork is invalid
-                    client.call(ProtocolConstants.METHOD_MARK_ARTWORK_INVALID, artworkUri.toString())
                 }
             }
-        } catch (e: IOException) {
-            Log.i(TAG, "Unable to preload artwork $artworkUri: ${e.message}")
+        }
+    } catch (e: Exception) {
+        when (e) {
+            is CancellationException -> throw e
+            else -> Log.i(TAG, "Provider $authority crashed while retrieving artwork: ${e.message}")
+        }
+    }
+    Result.retry()
+}
+
+/**
+ * Loads the single artwork identified by [targetUri] from its provider and inserts it as the
+ * current artwork, returning true on success. Returns false if the image can no longer be
+ * retrieved (e.g. removed from the source or the provider errors out) so the caller can fall
+ * through to a normal load.
+ */
+private suspend fun loadTargetArtwork(context: Context, targetUri: Uri): Boolean {
+    val database = MuzeiDatabase.getInstance(context)
+    val authority = targetUri.authority
+    val artworkId = try {
+        ContentUris.parseId(targetUri)
+    } catch (e: NumberFormatException) {
+        -1L
+    }
+    if (authority != null && artworkId >= 0) {
+        val contentUri = ProviderContract.getContentUri(authority)
+        try {
+            ContentProviderClientCompat.getClient(context, contentUri)?.use { client ->
+                client.query(
+                        contentUri,
+                        selection = "${BaseColumns._ID} = ?",
+                        selectionArgs = arrayOf(artworkId.toString())
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        checkForValidArtwork(client, contentUri, cursor)?.let { validArtwork ->
+                            validArtwork.providerAuthority = authority
+                            val id = database.artworkDao().insert(validArtwork)
+                            database.imageMetadataDao().ensureRow(
+                                    ImageMetadata(validArtwork.imageUri, authority))
+                            client.call(METHOD_MARK_ARTWORK_LOADED, validArtwork.imageUri.toString())
+                            if (BuildConfig.DEBUG) {
+                                Log.d(TAG, "Loaded favorite ${validArtwork.imageUri} into id $id")
+                            }
+                            return true
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             when (e) {
                 is CancellationException -> throw e
-                else -> Log.i(TAG, "Provider ${contentUri.authority} crashed preloading artwork " +
-                        "$artworkUri: ${e.message}")
+                else -> Log.i(TAG, "Provider $authority crashed loading favorite " +
+                        "$targetUri: ${e.message}")
             }
         }
-
-        return null
     }
+    if (BuildConfig.DEBUG) {
+        Log.d(TAG, "Favorite $targetUri unavailable; falling back to a normal load")
+    }
+    return false
+}
+
+private suspend fun checkForValidArtwork(
+        client: ContentProviderClientCompat,
+        contentUri: Uri,
+        data: Cursor
+): Artwork? {
+    val providerArtwork = com.google.android.apps.muzei.api.provider.Artwork.fromCursor(data)
+    val artworkUri = ContentUris.withAppendedId(contentUri, providerArtwork.id)
+    try {
+        client.openInputStream(artworkUri)?.use { inputStream ->
+            if (inputStream.isValidImage()) {
+                return Artwork(artworkUri).apply {
+                    title = providerArtwork.title
+                    byline = providerArtwork.byline
+                    attribution = providerArtwork.attribution
+                }
+            } else {
+                if (BuildConfig.DEBUG) {
+                    Log.w(TAG, "Artwork $artworkUri is not a valid image")
+                }
+                // Tell the client that the artwork is invalid
+                client.call(ProtocolConstants.METHOD_MARK_ARTWORK_INVALID, artworkUri.toString())
+            }
+        }
+    } catch (e: IOException) {
+        Log.i(TAG, "Unable to preload artwork $artworkUri: ${e.message}")
+    } catch (e: Exception) {
+        when (e) {
+            is CancellationException -> throw e
+            else -> Log.i(TAG, "Provider ${contentUri.authority} crashed preloading artwork " +
+                    "$artworkUri: ${e.message}")
+        }
+    }
+
+    return null
 }

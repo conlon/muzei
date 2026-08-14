@@ -162,6 +162,8 @@ class ProviderManager private constructor(private val context: Context)
         MuzeiDatabase.getInstance(context).artworkDao().getCurrentArtworkLiveData()
     }
     private var nextArtworkJob: Job? = null
+    // Coalesces in-process foreground "Next" loads so rapid taps run only the latest.
+    private var directLoadJob: Job? = null
     @OptIn(DelicateCoroutinesApi::class)
     private val artworkObserver = Observer<Artwork?> { artwork ->
         if (artwork == null) {
@@ -293,6 +295,7 @@ class ProviderManager private constructor(private val context: Context)
 
     override fun onInactive() {
         nextArtworkJob?.cancel()
+        directLoadJob?.cancel()
         artworkLiveData.removeObserver(artworkObserver)
         providerLiveData.removeObserver(this)
         context.contentResolver.unregisterContentObserver(contentObserver)
@@ -307,43 +310,45 @@ class ProviderManager private constructor(private val context: Context)
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     fun nextArtwork() {
         val prefs = androidx.core.content.ContextCompat
                 .createDeviceProtectedStorageContext(context)
                 ?.getSharedPreferences("wallpaper_preferences", Context.MODE_PRIVATE)
                 ?: context.getSharedPreferences("wallpaper_preferences", Context.MODE_PRIVATE)
         val favoriteBoost = prefs.getInt("favorite_boost", 0)
-        // favoriteBoost is the slider value 0..100: the probability (in percent) that this
-        // rotation should be forced to a favorite. At 0 we never force (fully normal); at 100 we
-        // always force (favorites only). Anywhere in between is a weighted coin flip. When the
-        // roll fails — or when there is no favorite to show — we fall back to normal, non-selective
-        // loading, which may still surface a favorite naturally.
-        if (favoriteBoost <= 0 || (Math.random() * 100) >= favoriteBoost) {
-            ArtworkLoadWorker.enqueueNext(context)
-            return
-        }
-        GlobalScope.launch {
-            val database = MuzeiDatabase.getInstance(context)
-            // Pick a random favorite other than the one already showing, so "Next" rotates to a
-            // different image. The favorite flag lives in the per-image metadata table, so the
-            // choice persists even after the rolling history log has rolled over.
-            val current = database.artworkDao().getCurrentArtwork()
-            val favoriteMeta = database.imageMetadataDao().getRandomFavorite(current?.imageUri)
-            if (favoriteMeta == null) {
-                // No favorite available (none marked, or the only favorite is already showing) —
-                // behave normally.
-                ArtworkLoadWorker.enqueueNext(context)
-                return@launch
+        // Load in-process rather than via WorkManager: routing a foreground "Next" through
+        // WorkManager/JobScheduler added several seconds of scheduling latency before the load
+        // even started, freezing pan/zoom until it finished. Cancel any in-flight load so rapid
+        // taps coalesce to the latest.
+        directLoadJob?.cancel()
+        directLoadJob = GlobalScope.launch {
+            var targetImageUri: Uri? = null
+            // favoriteBoost is the slider value 0..100: the probability (in percent) that this
+            // rotation should be forced to a favorite. At 0 we never force (fully normal); at 100
+            // we always force (favorites only). Anywhere in between is a weighted coin flip. When
+            // the roll fails — or there is no favorite to show — we fall through to a normal,
+            // non-selective load, which may still surface a favorite naturally.
+            if (favoriteBoost > 0 && (Math.random() * 100) < favoriteBoost) {
+                val database = MuzeiDatabase.getInstance(context)
+                // Pick a random favorite other than the one already showing, so "Next" rotates to
+                // a different image. The favorite flag lives in the per-image metadata table, so
+                // the choice persists even after the rolling history log has rolled over.
+                val current = database.artworkDao().getCurrentArtwork()
+                val favoriteMeta = database.imageMetadataDao().getRandomFavorite(current?.imageUri)
+                if (favoriteMeta != null) {
+                    // If the favorite is still in the recent-history log, re-surface it cheaply by
+                    // bumping its date_added and skip the provider load entirely.
+                    val match = database.artworkDao().getArtwork()
+                            .firstOrNull { it.imageUri == favoriteMeta.imageUri }
+                    if (match != null) {
+                        database.artworkDao().updateDateAdded(match.id, System.currentTimeMillis())
+                        return@launch
+                    }
+                    targetImageUri = favoriteMeta.imageUri
+                }
             }
-            // If the favorite is still in the recent-history log, re-surface it cheaply by bumping
-            // its date_added. Otherwise load it directly from its provider.
-            val match = database.artworkDao().getArtwork()
-                    .firstOrNull { it.imageUri == favoriteMeta.imageUri }
-            if (match != null) {
-                database.artworkDao().updateDateAdded(match.id, System.currentTimeMillis())
-            } else {
-                ArtworkLoadWorker.enqueueFavorite(context, favoriteMeta.imageUri)
-            }
+            loadArtworkNow(context, targetImageUri)
         }
     }
 }
